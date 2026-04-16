@@ -444,6 +444,10 @@ export default function ProductsPage() {
     setDescription('');
     setAttributes([{ name: 'Color', values: [] }, { name: 'Size', values: [] }]);
     setVariants([]);
+    setExtraPresets({});
+    setCategorySearch('');
+    setManufacturerSearch('');
+    setWarehouseSearch('');
     setCurrentStep(1);
   };
 
@@ -548,7 +552,6 @@ export default function ProductsPage() {
                             e.stopPropagation();
                             handleDeleteProduct(product.id);
                           }}
-                          title="Delete"
                         >
                           <Trash2 size={16}/>
                         </button>
@@ -588,11 +591,6 @@ export default function ProductsPage() {
                               </div>
                           </div>
                         ))}
-                        <div className={styles.addVariantRow}>
-                          <button className={styles.addVariantActionBtn} onClick={() => handleOpenAddSingle(product)}>
-                            <Plus size={14} style={{ marginRight: 6 }} /> Add New Variant SKU
-                          </button>
-                        </div>
                       </div>
                     )}
                   </div>
@@ -1062,7 +1060,7 @@ export default function ProductsPage() {
                                 onClick={() => {
                                   setSelectedWarehouse(w.name);
                                   setIsWarehouseOpen(false);
-                                  setWarehouseSearch(''); // Reset
+                                  setWarehouseSearch(''); 
                                 }}
                               >
                                 {w.name}
