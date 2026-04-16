@@ -1,0 +1,287 @@
+.container {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem 0;
+  animation: fadeIn 0.4s ease-out;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.header {
+  margin-bottom: 0.5rem;
+}
+
+.title {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 0.25rem;
+}
+
+.subtitle {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+}
+
+/* Rows Structure */
+.rowFour {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 1rem;
+}
+
+.rowSix {
+  display: grid;
+  grid-template-columns: repeat(6, 1fr);
+  gap: 1rem;
+}
+
+.rowCharts {
+  display: grid;
+  grid-template-columns: 2.5fr 1fr;
+  gap: 1rem;
+}
+
+.rowSingle {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 1rem;
+}
+
+.rowTwo {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+}
+
+.rowThree {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+}
+
+/* Base Panel / Card Styles */
+.card, .smallCard, .panel {
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 0;
+}
+
+/* Row 1 Specific */
+.card {
+  padding: 1.25rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  min-height: 100px;
+}
+
+.cardPrimary {
+  background: var(--accent-primary);
+  border-color: var(--accent-primary);
+}
+
+.cardContent {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.cardLabel, .cardLabelLight {
+  font-size: 0.7rem;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.cardLabel {
+  color: var(--text-secondary);
+}
+
+.cardLabelLight {
+  color: rgba(255, 255, 255, 0.7);
+}
+
+.cardValue, .cardValueLight {
+  font-size: 1.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+
+.cardValueLight {
+  color: #fff;
+}
+
+.cardSub, .cardSubLight {
+  font-size: 0.75rem;
+  margin-top: 4px;
+}
+
+.cardSub {
+  color: var(--text-secondary);
+}
+
+.cardSubLight {
+  color: rgba(255, 255, 255, 0.8);
+}
+
+.cardIconBox, .cardIconBoxLight {
+  width: 36px;
+  height: 36px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 4px; /* Slightly rounded per reference or 0. Since user wants 0, we'll enforce 0 */
+  border-radius: 0;
+}
+
+.cardIconBox {
+  background: rgba(0, 0, 0, 0.05);
+  color: var(--text-secondary);
+}
+
+.cardIconBoxLight {
+  background: rgba(255, 255, 255, 0.15);
+  color: white;
+}
+
+/* Row 2 Specific */
+.smallCard {
+  padding: 1rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  position: relative;
+  min-height: 90px;
+}
+
+.smallCardContent {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.smallCardLabel {
+  font-size: 0.65rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: 0.05em;
+  margin-bottom: 0.25rem;
+}
+
+.smallCardValue {
+  font-size: 1.25rem;
+  font-weight: 700;
+  color: var(--text-primary);
+  line-height: 1;
+}
+
+.smallCardSub {
+  font-size: 0.7rem;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+.smallIconBox {
+  width: 28px;
+  height: 28px;
+  background: rgba(0, 0, 0, 0.03);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-secondary);
+}
+
+/* Panels Specific (Charts & Lists) */
+.panel {
+  display: flex;
+  flex-direction: column;
+}
+
+.panelHeader, .panelHeaderBetween {
+  padding: 1rem 1.25rem;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-bottom: none;
+}
+
+.panelHeaderBetween {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid var(--border-color);
+}
+
+.panelHeaderBetween .panelHeader {
+  padding: 0;
+}
+
+.panelTitle {
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.viewAll {
+  font-size: 0.75rem;
+  color: var(--accent-primary);
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.panelEmpty {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  min-height: 120px;
+}
+
+/* Loading */
+.loadingContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 60vh;
+  gap: 1rem;
+  color: var(--text-secondary);
+}
+
+.spinner {
+  width: 24px;
+  height: 24px;
+  border: 2px solid var(--border-color);
+  border-top-color: var(--accent-primary);
+  border-radius: 50%;
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 1200px) {
+  .rowFour { grid-template-columns: 1fr 1fr; }
+  .rowSix { grid-template-columns: repeat(3, 1fr); }
+  .rowCharts { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 768px) {
+  .rowFour { grid-template-columns: 1fr; }
+  .rowSix { grid-template-columns: 1fr 1fr; }
+  .rowTwo { grid-template-columns: 1fr; }
+  .rowThree { grid-template-columns: 1fr; }
+}
