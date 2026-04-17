@@ -6,14 +6,14 @@ export default function Footer() {
   return (
     <footer style={{
       width: '100%',
-      padding: '24px 2rem',
+      padding: '14px 1.25rem',
       borderTop: '1px solid var(--border-color)',
       backgroundColor: 'var(--bg-elevated)',
       display: 'flex',
       alignItems: 'center',
       justifyContent: 'space-between',
       color: 'var(--text-secondary)',
-      fontSize: '0.85rem'
+      fontSize: '0.76rem'
     }}>
       <div>
         &copy; {new Date().getFullYear()} Watcon International. All rights reserved.

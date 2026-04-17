@@ -8,8 +8,8 @@
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
-  margin-bottom: 1rem;
-  padding: 0.75rem 0 0 0;
+  margin-bottom: 0.75rem;
+  padding: 0.4rem 0 0 0;
 }
 
 .title {
@@ -28,9 +28,9 @@
 .primaryAction {
   background: var(--accent-primary);
   color: white;
-  padding: 0.4rem 1rem;
+  padding: 0.35rem 0.85rem;
   font-weight: 600;
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   display: flex;
   align-items: center;
   transition: opacity 0.2s;
@@ -42,8 +42,8 @@
 
 .toolbar {
   display: flex;
-  gap: 1rem;
-  margin-bottom: 1.5rem;
+  gap: 0.75rem;
+  margin-bottom: 1rem;
   align-items: center;
 }
 
@@ -64,10 +64,10 @@
 
 .searchInput {
   width: 100%;
-  padding: 0.4rem 0.75rem 0.4rem 2.25rem;
+  padding: 0.35rem 0.65rem 0.35rem 2rem;
   border: 1px solid var(--border-color);
   background: white;
-  font-size: 0.8rem;
+  font-size: 0.78rem;
   outline: none;
 }
 
@@ -104,8 +104,8 @@
 .productCard {
   display: flex;
   align-items: center;
-  padding: 0.5rem 1rem;
-  gap: 1.25rem;
+  padding: 0.45rem 0.75rem;
+  gap: 0.9rem;
 }
 
 .expandBtn {
@@ -132,7 +132,7 @@
 .productNameWrapper {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.5rem;
   margin-bottom: 0.25rem;
 }
 
@@ -143,7 +143,7 @@
 }
 
 .attrSection {
-  margin-top: 2rem;
+  margin-top: 1.25rem;
 }
 
 .attrSectionHeader {
@@ -157,16 +157,16 @@
 }
 
 .attrSectionSub {
-  font-size: 0.8rem;
+  font-size: 0.75rem;
   color: var(--text-secondary);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .attrCard {
   background: white;
   border: 1px solid var(--border-color);
-  margin-bottom: 0.75rem;
-  padding: 1rem 1.25rem;
+  margin-bottom: 0.55rem;
+  padding: 0.8rem 0.95rem;
   transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
@@ -179,7 +179,7 @@
 .attrCardHeader {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
+  gap: 0.85rem;
   cursor: pointer;
   user-select: none;
 }
@@ -224,24 +224,24 @@
 }
 
 .attrExpandedContent {
-  margin-top: 1.25rem;
-  padding-left: 2.35rem;
+  margin-top: 0.9rem;
+  padding-left: 1.75rem;
   border-top: 1px solid #f1f5f9;
-  padding-top: 1.25rem;
+  padding-top: 0.9rem;
 }
 
 .presetsGrid {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.65rem;
-  margin-bottom: 1.5rem;
+  gap: 0.45rem;
+  margin-bottom: 1rem;
 }
 
 .presetChip {
-  padding: 8px 20px;
+  padding: 6px 14px;
   border: 1px solid #e2e8f0;
   background: white;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   font-weight: 400;
   color: var(--text-primary);
   transition: all 0.1s;
@@ -334,8 +334,8 @@
 
 .productStats {
   display: flex;
-  gap: 2rem;
-  margin-right: 2rem;
+  gap: 1rem;
+  margin-right: 1rem;
 }
 
 .statItem {
@@ -362,9 +362,9 @@
 }
 
 .secondaryBtn {
-  font-size: 0.8rem;
+  font-size: 0.76rem;
   font-weight: 600;
-  padding: 0.5rem 1rem;
+  padding: 0.4rem 0.8rem;
   border: 1px solid var(--border-color);
   background: white;
   display: flex;
@@ -389,12 +389,12 @@
   display: grid;
   grid-template-columns: 2fr 1.5fr 3fr 1.5fr 100px 100px 120px;
   align-items: center;
-  gap: 1.5rem;
+  gap: 0.85rem;
 }
 
 .variantHeader {
-  padding: 1.25rem 0;
-  font-size: 0.7rem;
+  padding: 0.8rem 0;
+  font-size: 0.65rem;
   font-weight: 700;
   text-transform: uppercase;
   color: var(--text-secondary);
@@ -403,8 +403,8 @@
 }
 
 .variantRow {
-  padding: 1.25rem 0;
-  font-size: 0.9rem;
+  padding: 0.85rem 0;
+  font-size: 0.82rem;
   border-top: 1px solid #f8fafc;
 }
 
@@ -424,7 +424,7 @@
 
 .variantMfgText {
   color: var(--text-secondary);
-  font-size: 0.85rem;
+  font-size: 0.78rem;
 }
 
 .variantAttrsList {
@@ -466,7 +466,7 @@
 
 .variantRowActions {
   display: flex;
-  gap: 0.75rem;
+  gap: 0.45rem;
   justify-content: flex-end;
 }
 
@@ -491,21 +491,21 @@
 
 .card {
   background: white;
-  padding: 1.5rem;
+  padding: 1rem;
   border: 1px solid var(--border-color);
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .cardTitle {
-  font-size: 1rem;
+  font-size: 0.92rem;
   font-weight: 700;
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.02em;
 }
 
 .formGroup {
-  margin-bottom: 1.25rem;
+  margin-bottom: 0.9rem;
 }
 
 .formGroup label {
@@ -524,13 +524,13 @@
 .formGroup textarea,
 .formSelect {
   width: 100%;
-  padding: 0.4rem 0.75rem;
+  padding: 0.36rem 0.65rem;
   border: 1px solid var(--border-color);
   outline: none;
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   background: #fcfdfe;
   transition: all 0.2s;
-  min-height: 2.25rem;
+  min-height: 2.05rem;
 }
 
 .formSelect {
@@ -554,7 +554,7 @@
 .formRow {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 2.5rem;
+  gap: 1.25rem;
 }
 
 .cardHeader {
@@ -573,8 +573,8 @@
 
 .attributeRow {
   display: flex;
-  gap: 0.75rem;
-  margin-bottom: 0.75rem;
+  gap: 0.55rem;
+  margin-bottom: 0.55rem;
   align-items: center;
 }
 
@@ -594,8 +594,8 @@
 
 .generateBtn {
   width: 100%;
-  margin-top: 1rem;
-  padding: 0.75rem;
+  margin-top: 0.7rem;
+  padding: 0.6rem;
   background: #f8fafc;
   border: 1px solid var(--border-color);
   color: var(--accent-primary);
@@ -610,17 +610,17 @@
 .variantsList {
   display: flex;
   flex-direction: column;
-  gap: 0.5rem;
+  gap: 0.35rem;
   max-height: 500px;
   overflow-y: auto;
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
 }
 
 .variantItem {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  padding: 0.75rem;
+  gap: 0.55rem;
+  padding: 0.6rem;
   border: 1px solid var(--border-color);
 }
 
@@ -734,7 +734,7 @@
 .creatorWrapper {
   width: 100%;
   margin: 0;
-  padding: 0 0 4rem 0;
+  padding: 0 0 2rem 0;
   background: white;
 }
 
@@ -783,8 +783,8 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 1rem;
-  padding-top: 0.75rem;
+  margin-top: 0.75rem;
+  padding-top: 0.6rem;
   border-top: 1px solid var(--border-color);
 }
 
@@ -799,7 +799,7 @@
 }
 
 .draftBtn {
-  padding: 0.85rem 2rem;
+  padding: 0.6rem 1.25rem;
   color: var(--text-secondary);
   font-weight: 500;
   border: 1px solid var(--border-color);
@@ -815,7 +815,7 @@
 .wizardNextBtn {
   background: var(--accent-primary);
   color: white;
-  padding: 0.45rem 1.5rem;
+  padding: 0.42rem 1.15rem;
   font-weight: 600;
   font-size: 0.8rem;
   display: flex;
@@ -825,7 +825,7 @@
 }
 
 .wizardBackBtn {
-  padding: 0.45rem 1.25rem;
+  padding: 0.42rem 1rem;
   border: 1px solid var(--border-color);
   color: var(--text-primary);
   font-weight: 600;
@@ -849,14 +849,14 @@
   align-items: center;
   justify-content: center;
   z-index: 9999;
-  padding: 2rem;
+  padding: 1rem;
 }
 
 .minimalModal {
   background: white;
   width: 100%;
   max-width: 500px;
-  padding: 2rem;
+  padding: 1.35rem;
   box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   border: 1px solid var(--border-color);
 }
@@ -869,15 +869,161 @@
 }
 
 .modalSubtitle {
-  font-size: 0.85rem;
+  font-size: 0.8rem;
   color: var(--text-secondary);
-  margin-bottom: 2rem;
+  margin-bottom: 1.25rem;
 }
 
 .modalActions {
   display: flex;
   justify-content: flex-end;
   gap: 1rem;
+}
+
+/* ─── Delete Variant Modal ───────────────────────────── */
+.deleteVariantModal {
+  background: white;
+  width: 100%;
+  max-width: 420px;
+  border: 1px solid var(--danger-border);
+  box-shadow: 0 20px 60px -10px rgba(220, 38, 38, 0.18), 0 4px 16px rgba(0,0,0,0.08);
+  overflow: hidden;
+}
+
+.deleteModalHeader {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.25rem 1.5rem;
+  background: var(--danger-bg);
+  border-bottom: 2px solid var(--danger-border);
+}
+
+.deleteModalIcon {
+  width: 40px;
+  height: 40px;
+  background: var(--danger);
+  color: white;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+}
+
+.deleteModalHeaderText {
+  flex: 1;
+}
+
+.deleteModalTitle {
+  font-size: 1rem;
+  font-weight: 700;
+  color: var(--danger);
+  margin-bottom: 0.1rem;
+  letter-spacing: -0.01em;
+}
+
+.deleteModalSub {
+  font-size: 0.7rem;
+  font-weight: 600;
+  color: #b91c1c;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  opacity: 0.8;
+}
+
+.deleteModalClose {
+  width: 28px;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: #b91c1c;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  border: 1px solid transparent;
+}
+
+.deleteModalClose:hover {
+  background: var(--danger-border);
+  border-color: var(--danger-border);
+  color: var(--danger);
+}
+
+.deleteModalBody {
+  padding: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.deleteModalAlert {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  padding: 0.75rem 1rem;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  color: #92400e;
+  font-size: 0.78rem;
+  line-height: 1.5;
+}
+
+.deleteReasonArea {
+  width: 100%;
+  padding: 0.65rem 0.85rem;
+  border: 1.5px solid var(--danger-border);
+  font-family: inherit;
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  background: #fffafa;
+  outline: none;
+  resize: vertical;
+  transition: border-color 0.2s, box-shadow 0.2s;
+  line-height: 1.5;
+  border-radius: 0;
+}
+
+.deleteReasonArea:focus {
+  border-color: var(--danger);
+  box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
+}
+
+.deleteReasonArea::placeholder {
+  color: #94a3b8;
+}
+
+.deleteModalFooter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 1.5rem;
+  border-top: 1px solid var(--danger-border);
+  background: var(--danger-bg);
+}
+
+.deleteConfirmBtn {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1.4rem;
+  background: var(--danger);
+  color: white;
+  font-weight: 700;
+  font-size: 0.8rem;
+  letter-spacing: 0.02em;
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.2s, transform 0.15s;
+}
+
+.deleteConfirmBtn:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+.deleteConfirmBtn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
 }
 
 .customSelectWrapper {
@@ -964,15 +1110,15 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
 }
 
 .wizardContainer {
   display: grid;
-  grid-template-columns: 280px 1fr;
-  gap: 2rem;
+  grid-template-columns: 230px 1fr;
+  gap: 1rem;
   min-height: auto;
-  padding: 0.5rem 1rem 2rem;
+  padding: 0.25rem 0.5rem 1rem;
 }
 
 .verticalSidebar {
@@ -980,14 +1126,14 @@
   flex-direction: column;
   gap: 0;
   border-right: 1px solid #f1f5f9;
-  padding-right: 2rem;
+  padding-right: 1rem;
 }
 
 .vertStep {
   display: flex;
   align-items: center;
-  gap: 1.25rem;
-  padding: 1.5rem 0;
+  gap: 0.8rem;
+  padding: 1rem 0;
   opacity: 0.3;
   transition: all 0.3s;
   position: relative;
@@ -996,7 +1142,7 @@
 .vertStep::after {
   content: '';
   position: absolute;
-  right: -2rem;
+  right: -1rem;
   top: 0;
   bottom: 0;
   width: 3px;
@@ -1013,8 +1159,8 @@
 }
 
 .vertIcon {
-  width: 40px;
-  height: 40px;
+  width: 34px;
+  height: 34px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1045,33 +1191,33 @@
 }
 
 .vertTitle {
-  font-size: 0.95rem;
+  font-size: 0.85rem;
   font-weight: 600;
   color: var(--text-primary);
 }
 
 .wizardContentArea {
   flex: 1;
-  max-width: 900px;
+  max-width: 860px;
 }
 
 .genHeader {
-  padding: 2.5rem 2.5rem 1.5rem;
+  padding: 1.25rem 1.25rem 0.9rem;
   border-bottom: 1px solid #f1f5f9;
 }
 
 .genTitle {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
-  font-size: 1.25rem;
-  margin-bottom: 0.5rem;
+  gap: 0.55rem;
+  font-size: 1.05rem;
+  margin-bottom: 0.35rem;
 }
 
 .genSubtitle {
-  font-size: 0.85rem;
+  font-size: 0.78rem;
   color: var(--text-secondary);
-  margin-bottom: 2rem;
+  margin-bottom: 1rem;
 }
 
 .genSteps {
@@ -1188,30 +1334,32 @@
 
 .formSelectCompact {
   width: 100%;
-  padding: 0.3rem 0.6rem;
+  height: 2rem;
+  padding: 0 0.6rem;
   font-size: 0.8rem;
   border: 1px solid var(--border-color);
   background: white;
   transition: all 0.2s;
   outline: none;
-  min-height: auto;
   appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2364748b' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
   background-repeat: no-repeat;
   background-position: right 0.5rem center;
   background-size: 0.85rem;
+  box-sizing: border-box;
 }
 
 .formInputCompact {
   width: 100%;
-  padding: 0.3rem 0.6rem;
+  height: 2rem;
+  padding: 0 0.6rem;
   font-size: 0.8rem;
   border: 1px solid var(--border-color);
   background: white;
   transition: all 0.2s;
   outline: none;
-  min-height: auto;
   border-radius: 0;
+  box-sizing: border-box;
 }
 
 .formSelectCompact:focus,
@@ -1219,6 +1367,7 @@
   border-color: var(--accent-primary);
   box-shadow: 0 0 0 1px var(--accent-primary);
 }
+
 
 .footerSection {
   display: grid;

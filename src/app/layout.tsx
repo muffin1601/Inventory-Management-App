@@ -1,13 +1,11 @@
 import type { Metadata } from "next";
 import "./globals.css";
-import Sidebar from "@/components/Sidebar";
-import Header from "@/components/Header";
-import Footer from "@/components/Footer";
-import styles from "@/components/Layout.module.css";
+import AppShell from "@/components/AppShell";
+import { AppProviders } from "@/components/ui/AppProviders";
 
 export const metadata: Metadata = {
-  title: "Watcon International - Dashboard",
-  description: "Watcon International Inventory & BI Dashboard",
+  title: "Watcon International - Inventory Management",
+  description: "Inventory, projects, BOQ, procurement, and reporting",
 };
 
 export default function RootLayout({
@@ -18,16 +16,9 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body>
-        <div className={styles.layout}>
-          <Sidebar />
-          <main className={styles.main}>
-            <Header />
-            <div className={styles.pageContent}>
-              {children}
-            </div>
-            <Footer />
-          </main>
-        </div>
+        <AppProviders>
+          <AppShell>{children}</AppShell>
+        </AppProviders>
       </body>
     </html>
   );

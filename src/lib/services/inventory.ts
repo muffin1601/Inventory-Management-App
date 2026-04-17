@@ -1,5 +1,75 @@
 import { supabase } from '../supabase';
-import { Product, Variant, ProductSummary } from '../../types/inventory';
+import { Product, Variant } from '../../types/inventory';
+
+const UNITS_KEY = 'ims_units_v1';
+const DEFAULT_UNITS = [
+  'Numbers',
+  'Pcs',
+  'Pieces',
+  'Sets',
+  'Boxes',
+  'Bags',
+  'Kilograms',
+  'Liters',
+  'Meters',
+  'Square Feet',
+  'Square Meter',
+  'Tons',
+];
+const REASONS_KEY = 'ims_reason_options_v1';
+const DEFAULT_REASONS = [
+  'Cycle Count',
+  'Stock Correction',
+  'Damaged Goods',
+  'Supplier Return',
+  'Customer Allocation',
+  'Warehouse Reallocation',
+  'Data Cleanup',
+  'Obsolete Item',
+  'Goods Received',
+  'Goods Issued',
+  'Warehouse Transfer',
+];
+
+function readLocalList(key: string, fallback: string[]) {
+  if (typeof window === 'undefined') return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function writeLocalList(key: string, value: string[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(key, JSON.stringify(value));
+}
+
+function isMissingStockMovementsEndpoint(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as {
+    code?: string;
+    message?: string;
+    details?: string;
+    status?: number;
+  };
+
+  const combinedMessage = `${candidate.message || ''} ${candidate.details || ''}`.toLowerCase();
+
+  return (
+    candidate.status === 404 ||
+    candidate.code === 'PGRST205' ||
+    candidate.code === '42P01' ||
+    combinedMessage.includes('stock_movements') ||
+    combinedMessage.includes('could not find') ||
+    combinedMessage.includes('relation') ||
+    combinedMessage.includes('not found')
+  );
+}
 
 export const inventoryService = {
   async getProducts(): Promise<any[]> {
@@ -12,6 +82,7 @@ export const inventoryService = {
           variants:variants(
             id, sku, price, attributes,
             inventory:inventory(
+              id,
               quantity,
               warehouse:warehouses(id, name)
             )
@@ -33,6 +104,7 @@ export const inventoryService = {
               variants:variants(
                 id, sku, price, attributes,
                 inventory:inventory(
+                  id,
                   quantity,
                   warehouse:warehouses(id, name)
                 )
@@ -61,6 +133,8 @@ export const inventoryService = {
         return {
           ...v,
           stock_data: stockData.map((item: any) => ({
+            inventory_id: item.id || '',
+            warehouse_id: item.warehouse?.id || '',
             warehouse_name: item.warehouse?.name || '-',
             quantity: item.quantity || 0
           })),
@@ -91,6 +165,87 @@ export const inventoryService = {
     }
   },
 
+  async updateVariantDetails(input: {
+    variantId: string;
+    attributes: Record<string, string>;
+    warehouseId: string;
+    quantity: number;
+    inventoryId?: string;
+  }) {
+    const { error: variantError } = await supabase
+      .from('variants')
+      .update({
+        attributes: input.attributes,
+      })
+      .eq('id', input.variantId);
+
+    if (variantError) throw variantError;
+
+    if (input.inventoryId) {
+      const { error: inventoryUpdateError } = await supabase
+        .from('inventory')
+        .update({
+          warehouse_id: input.warehouseId,
+          quantity: input.quantity,
+        })
+        .eq('id', input.inventoryId);
+
+      if (inventoryUpdateError) throw inventoryUpdateError;
+      return true;
+    }
+
+    const { data: existingInventoryRows, error: existingInventoryError } = await supabase
+      .from('inventory')
+      .select('id')
+      .eq('variant_id', input.variantId)
+      .eq('warehouse_id', input.warehouseId)
+      .limit(1);
+
+    if (existingInventoryError) throw existingInventoryError;
+
+    const existingInventory = existingInventoryRows?.[0];
+
+    if (existingInventory?.id) {
+      const { error: inventoryUpdateError } = await supabase
+        .from('inventory')
+        .update({
+          quantity: input.quantity,
+        })
+        .eq('id', existingInventory.id);
+
+      if (inventoryUpdateError) throw inventoryUpdateError;
+      return true;
+    }
+
+    const { error: inventoryInsertError } = await supabase
+      .from('inventory')
+      .insert({
+        variant_id: input.variantId,
+        warehouse_id: input.warehouseId,
+        quantity: input.quantity,
+      });
+
+    if (inventoryInsertError) throw inventoryInsertError;
+    return true;
+  },
+
+  async deleteVariant(variantId: string) {
+    const { error: inventoryDeleteError } = await supabase
+      .from('inventory')
+      .delete()
+      .eq('variant_id', variantId);
+
+    if (inventoryDeleteError) throw inventoryDeleteError;
+
+    const { error: variantDeleteError } = await supabase
+      .from('variants')
+      .delete()
+      .eq('id', variantId);
+
+    if (variantDeleteError) throw variantDeleteError;
+    return true;
+  },
+
   async getManufacturers() {
     const { data, error } = await supabase.from('manufacturers').select('*').order('name');
     if (error) return [];
@@ -117,8 +272,7 @@ export const inventoryService = {
         product_id: data.product_id,
         sku: data.sku,
         attributes: data.attributes,
-        price: data.price || 0,
-        brand: data.brand || ''
+        price: data.price || 0
       })
       .select()
       .single();
@@ -163,8 +317,7 @@ export const inventoryService = {
           product_id: productData.id,
           sku: v.sku,
           attributes: v.attributes,
-          price: (v as any).price || 0,
-          brand: (v as any).brand || ''
+          price: (v as any).price || 0
         }));
 
         const { data: variantsData, error: variantsError } = await supabase
@@ -223,15 +376,38 @@ export const inventoryService = {
           product_id: productId,
           sku: v.sku,
           attributes: v.attributes,
-          brand: v.brand || product.brand || '',
           price: v.price || 0
         }));
 
-        const { error: varError } = await supabase
+        const { data: variantsData, error: varError } = await supabase
           .from('variants')
-          .upsert(variantsToUpsert, { onConflict: 'sku' });
+          .upsert(variantsToUpsert, { onConflict: 'sku' })
+          .select();
         
         if (varError) throw varError;
+
+        // 3. Ensure new or existing variants have inventory tracking records
+        if (variantsData && product.main_warehouse_id) {
+          const { data: existingInv } = await supabase
+            .from('inventory')
+            .select('variant_id')
+            .in('variant_id', variantsData.map(v => v.id));
+            
+          const existingVarIds = new Set(existingInv?.map(i => i.variant_id) || []);
+          
+          const missingInv = variantsData
+            .filter(v => !existingVarIds.has(v.id))
+            .map(v => ({
+              variant_id: v.id,
+              warehouse_id: product.main_warehouse_id,
+              quantity: 0
+            }));
+
+          if (missingInv.length > 0) {
+            const { error: invError } = await supabase.from('inventory').insert(missingInv);
+            if (invError) console.error("Initial edit inventory insert failed:", invError);
+          }
+        }
       }
 
       return true;
@@ -245,6 +421,47 @@ export const inventoryService = {
     const { data, error } = await supabase.from('warehouses').select('*').order('name');
     if (error) return [];
     return data;
+  },
+
+  async getUnits() {
+    const products = await this.getProducts();
+    const catalogUnits = products.flatMap((product: any) =>
+      (product.variants || [])
+        .map((variant: any) => variant.attributes?.Unit)
+        .filter(Boolean),
+    );
+
+    const savedUnits = readLocalList(UNITS_KEY, DEFAULT_UNITS);
+    return Array.from(new Set([...DEFAULT_UNITS, ...savedUnits, ...catalogUnits])).sort((a, b) => a.localeCompare(b));
+  },
+
+  async createUnit(name: string) {
+    const normalized = name.trim();
+    if (!normalized) {
+      throw new Error('Unit name is required.');
+    }
+
+    const currentUnits = readLocalList(UNITS_KEY, DEFAULT_UNITS);
+    const nextUnits = Array.from(new Set([...currentUnits, normalized]));
+    writeLocalList(UNITS_KEY, nextUnits);
+    return normalized;
+  },
+
+  async getReasons() {
+    const savedReasons = readLocalList(REASONS_KEY, DEFAULT_REASONS);
+    return Array.from(new Set([...DEFAULT_REASONS, ...savedReasons])).sort((a, b) => a.localeCompare(b));
+  },
+
+  async createReason(name: string) {
+    const normalized = name.trim();
+    if (!normalized) {
+      throw new Error('Reason is required.');
+    }
+
+    const currentReasons = readLocalList(REASONS_KEY, DEFAULT_REASONS);
+    const nextReasons = Array.from(new Set([...currentReasons, normalized]));
+    writeLocalList(REASONS_KEY, nextReasons);
+    return normalized;
   },
 
   async recordMovement(movement: {
@@ -261,25 +478,42 @@ export const inventoryService = {
         .from('stock_movements')
         .insert(movement);
 
-      if (moveError) throw moveError;
+      if (moveError && !isMissingStockMovementsEndpoint(moveError)) {
+        throw moveError;
+      }
+
+      if (moveError && isMissingStockMovementsEndpoint(moveError)) {
+        console.warn('stock_movements endpoint missing; continuing with inventory update only.');
+      }
 
       // 2. Update Inventory balance
-      // Check if record exists
-      const { data: inv, error: invFetchError } = await supabase
+      const { data: inventoryRows, error: inventoryError } = await supabase
         .from('inventory')
-        .select('*')
+        .select('id, quantity')
         .eq('variant_id', movement.variant_id)
-        .eq('warehouse_id', movement.warehouse_id)
-        .single();
+        .eq('warehouse_id', movement.warehouse_id);
+
+      if (inventoryError) throw inventoryError;
 
       const change = movement.type === 'OUT' ? -movement.quantity : movement.quantity;
+      const primaryRow = inventoryRows?.[0];
+      const duplicateRowIds = (inventoryRows || []).slice(1).map((row) => row.id);
 
-      if (inv) {
+      if (primaryRow) {
+        const nextQuantity = (inventoryRows || []).reduce((sum, row) => sum + (row.quantity || 0), 0) + change;
         const { error: updateError } = await supabase
           .from('inventory')
-          .update({ quantity: (inv.quantity || 0) + change })
-          .eq('id', inv.id);
+          .update({ quantity: nextQuantity })
+          .eq('id', primaryRow.id);
         if (updateError) throw updateError;
+
+        if (duplicateRowIds.length > 0) {
+          const { error: deleteDuplicatesError } = await supabase
+            .from('inventory')
+            .delete()
+            .in('id', duplicateRowIds);
+          if (deleteDuplicatesError) throw deleteDuplicatesError;
+        }
       } else {
         const { error: insertError } = await supabase
           .from('inventory')

@@ -9,8 +9,11 @@ import {
   Tag, Info, History, ChevronLeft, LayoutGrid, List
 } from 'lucide-react';
 import { inventoryService } from '@/lib/services/inventory';
-import { ProductSummary, AttributeType } from '@/types/inventory';
+import { ProductSummary } from '@/types/inventory';
 import { supabase } from '@/lib/supabase';
+import { modulesService } from '@/lib/services/modules';
+import { useUi } from '@/components/ui/AppProviders';
+import SearchableSelect from '@/components/ui/SearchableSelect';
 
 const PRESET_ATTRIBUTES = [
   { name: 'Size', values: ['S', 'M', 'L', 'XL', '2XL'] },
@@ -24,6 +27,7 @@ const PRESET_ATTRIBUTES = [
 type Attribute = { name: string; values: string[] };
 
 export default function ProductsPage() {
+  const { showToast } = useUi();
   const [loading, setLoading] = useState(true);
   const [isCreating, setIsCreating] = useState(false);
   const [products, setProducts] = useState<any[]>([]);
@@ -36,6 +40,7 @@ export default function ProductsPage() {
   const [manufacturersList, setManufacturersList] = useState<any[]>([]);
   const [attributeTypesList, setAttributeTypesList] = useState<any[]>([]);
   const [warehousesList, setWarehousesList] = useState<any[]>([]);
+  const [unitsList, setUnitsList] = useState<string[]>([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('');
 
   // Form State
@@ -56,13 +61,9 @@ export default function ProductsPage() {
 
   // New Item Modal
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [modalType, setModalType] = useState<'category' | 'manufacturer' | 'attribute' | 'warehouse'>('category');
+  const [modalType, setModalType] = useState<'category' | 'manufacturer' | 'attribute' | 'warehouse' | 'unit'>('category');
   const [modalValue, setModalValue] = useState('');
 
-  // Dropdown States
-  const [isCategoryOpen, setIsCategoryOpen] = useState(false);
-  const [isManufacturerOpen, setIsManufacturerOpen] = useState(false);
-  const [isWarehouseOpen, setIsWarehouseOpen] = useState(false);
   // Delete Confirmation
   const [deleteConfirm, setDeleteConfirm] = useState<{isOpen: boolean, productId: string | null, reason: string}>({
     isOpen: false,
@@ -70,17 +71,27 @@ export default function ProductsPage() {
     reason: ''
   });
 
-  // Search Terms for Dropdowns
-  const [categorySearch, setCategorySearch] = useState('');
-  const [manufacturerSearch, setManufacturerSearch] = useState('');
-  const [warehouseSearch, setWarehouseSearch] = useState('');
-
   // Custom Attribute Types
   const [userDefinedAttributes, setUserDefinedAttributes] = useState<{name: string, values: string[]}[]>([]);
+  const [canCreateProducts, setCanCreateProducts] = useState(false);
+  const [canEditProducts, setCanEditProducts] = useState(false);
+  const [canDeleteProducts, setCanDeleteProducts] = useState(false);
 
   useEffect(() => {
     fetchProducts();
     fetchLookups();
+    const current = modulesService.getCurrentUser();
+    setCanCreateProducts(modulesService.hasPermission(current, 'products.create'));
+    setCanEditProducts(modulesService.hasPermission(current, 'products.edit'));
+    setCanDeleteProducts(modulesService.hasPermission(current, 'products.delete'));
+    const onUserChange = () => {
+      const refreshed = modulesService.getCurrentUser();
+      setCanCreateProducts(modulesService.hasPermission(refreshed, 'products.create'));
+      setCanEditProducts(modulesService.hasPermission(refreshed, 'products.edit'));
+      setCanDeleteProducts(modulesService.hasPermission(refreshed, 'products.delete'));
+    };
+    window.addEventListener('ims-current-user-changed', onUserChange);
+    return () => window.removeEventListener('ims-current-user-changed', onUserChange);
   }, []);
 
   const fetchProducts = async () => {
@@ -97,20 +108,71 @@ export default function ProductsPage() {
 
   const fetchLookups = async () => {
     try {
-      const [cats, mfgs, attrs, whs] = await Promise.all([
+      const [cats, mfgs, attrs, whs, units] = await Promise.all([
         inventoryService.getCategories(),
         inventoryService.getManufacturers(),
         inventoryService.getAttributeTypes(),
-        inventoryService.getWarehouses()
+        inventoryService.getWarehouses(),
+        inventoryService.getUnits(),
       ]);
       setCategoriesList(cats);
       setManufacturersList(mfgs);
       setAttributeTypesList(attrs);
       setWarehousesList(whs);
+      setUnitsList(units);
       if (whs.length > 0) setSelectedWarehouse(whs[0].name);
     } catch (err) {
       console.error("Failed to fetch lookups:", err);
     }
+  };
+
+  const categoryOptions = categoriesList.map((item) => ({
+    value: item,
+    label: item,
+    keywords: [item],
+  }));
+
+  const manufacturerOptions = manufacturersList.map((item) => ({
+    value: item.name,
+    label: item.name,
+    keywords: [item.name],
+  }));
+
+  const warehouseOptions = warehousesList.map((item) => ({
+    value: item.name,
+    label: item.name,
+    keywords: [item.name],
+  }));
+
+  const unitOptions = unitsList.map((item) => ({
+    value: item,
+    label: item,
+    keywords: [item],
+  }));
+
+  const createCategoryOption = async (value: string) => {
+    const normalized = value.trim().toUpperCase();
+    if (!normalized) return '';
+    setCategoriesList((prev) => Array.from(new Set([...prev, normalized])));
+    return normalized;
+  };
+
+  const createManufacturerOption = async (value: string) => {
+    const created = await inventoryService.createManufacturer(value.trim().toUpperCase());
+    setManufacturersList(await inventoryService.getManufacturers());
+    return created.name;
+  };
+
+  const createWarehouseOption = async (value: string) => {
+    const created = await inventoryService.createWarehouse(value.trim().toUpperCase());
+    setWarehousesList(await inventoryService.getWarehouses());
+    return created.name;
+  };
+
+  const createUnitOption = async (value: string) => {
+    const created = await inventoryService.createUnit(value.trim().toUpperCase());
+    setUnitsList(await inventoryService.getUnits());
+    return created;
   };
 
   const toggleExpand = (productId: string) => {
@@ -123,17 +185,17 @@ export default function ProductsPage() {
     setExpandedProducts(newExpanded);
   };
 
-  const handleOpenGenerate = (product: ProductSummary) => {
+  const handleOpenGenerate = (product: any) => {
     setIsCreating(true);
     setEditingProduct(product);
     setCurrentStep(2); // Jump straight to attributes
     setProductName(product.name);
-    setCategory(product.category);
-    setManufacturer(product.brand);
+    setCategory(product.category || '');
+    setManufacturer(product.brand || '');
     setDescription(product.description || '');
     // Re-hydrate attributes from existing variants if any
-    const existingAttrs: AttributeType[] = [];
-    product.variants?.forEach(v => {
+    const existingAttrs: Attribute[] = [];
+    product.variants?.forEach((v: any) => {
       Object.entries(v.attributes).forEach(([key, val]) => {
         const existing = existingAttrs.find(a => a.name === key);
         if (existing) {
@@ -151,7 +213,7 @@ export default function ProductsPage() {
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
   const [deleteReason, setDeleteReason] = useState('');
   const [variantToDelete, setVariantToDelete] = useState<string | null>(null);
-  const [activeProductForSingle, setActiveProductForSingle] = useState<ProductSummary | null>(null);
+  const [activeProductForSingle, setActiveProductForSingle] = useState<any>(null);
   const [activeVariantForEdit, setActiveVariantForEdit] = useState<any>(null);
   const [singleVariantForm, setSingleVariantForm] = useState({
     sku: '',
@@ -163,21 +225,27 @@ export default function ProductsPage() {
     quantity: 0
   });
 
-  const handleOpenAddSingle = (product: ProductSummary) => {
+  const handleOpenAddSingle = (product: any) => {
+    const defaultManufacturer = product.brand || product.variants?.[0]?.brand || '';
+    const defaultUnit =
+      product.variants?.[0]?.unit ||
+      product.variants?.[0]?.attributes?.Unit ||
+      'Numbers';
+
     setActiveProductForSingle(product);
     setIsAddingSingle(true);
     setSingleVariantForm({
       sku: `${product.name.substring(0,3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
-      manufacturer: '',
+      manufacturer: defaultManufacturer,
       price: product.variants?.[0]?.price || 0,
       attributes: {},
       warehouse: warehousesList[0]?.name || '',
-      unit: 'Numbers',
+      unit: defaultUnit,
       quantity: 0
     });
   };
 
-  const handleOpenEditVariant = (product: ProductSummary, variant: any) => {
+  const handleOpenEditVariant = (product: any, variant: any) => {
     setActiveProductForSingle(product);
     setActiveVariantForEdit(variant);
     setIsEditingVariant(true);
@@ -203,13 +271,14 @@ export default function ProductsPage() {
   };
 
   const confirmDeleteVariant = async () => {
-    if (!deleteReason.trim()) return alert("Please provide a reason for deletion.");
+    if (!deleteReason.trim()) return showToast("Please provide a reason for deletion.", 'error');
     try {
       const { error } = await supabase.from('variants').delete().eq('id', variantToDelete);
       if (error) throw error;
       setIsDeleteModalOpen(false);
       fetchProducts();
-    } catch (err) { alert("Error deleting variant"); }
+      showToast("Item option deleted.", 'success');
+    } catch (err) { showToast("Error deleting item option.", 'error'); }
   };
 
   const handleDeleteProduct = (productId: string) => {
@@ -222,8 +291,9 @@ export default function ProductsPage() {
       await inventoryService.deleteProduct(deleteConfirm.productId);
       setDeleteConfirm({ isOpen: false, productId: null, reason: '' });
       fetchProducts();
+      showToast("Product deleted.", 'success');
     } catch (err) {
-      alert("Failed to delete product.");
+      showToast("Failed to delete product.", 'error');
     }
   };
 
@@ -412,9 +482,12 @@ export default function ProductsPage() {
       const enabledVariants = variants
         .filter(v => v.enabled)
         .map(v => ({
+          id: v.id,
           sku: v.sku,
-          attributes: v.attributes,
-          brand: v.brand || '',
+          attributes: { 
+            ...v.attributes, 
+            ...(v.brand ? { Manufacturer: v.brand } : {}) 
+          },
           price: v.price || 0
         }));
 
@@ -445,9 +518,6 @@ export default function ProductsPage() {
     setAttributes([{ name: 'Color', values: [] }, { name: 'Size', values: [] }]);
     setVariants([]);
     setExtraPresets({});
-    setCategorySearch('');
-    setManufacturerSearch('');
-    setWarehouseSearch('');
     setCurrentStep(1);
   };
 
@@ -462,9 +532,9 @@ export default function ProductsPage() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Item Catalog</h1>
-          <p className={styles.subtitle}>Products with variant attributes. Auto-generate SKUs from combinations.</p>
+          <p className={styles.subtitle}>Products with options. Auto-generate item codes from combinations.</p>
         </div>
-        {!isCreating && !isAddingSingle && !isEditingVariant && (
+        {!isCreating && !isAddingSingle && !isEditingVariant && canCreateProducts && (
           <button className={styles.primaryAction} onClick={() => setIsCreating(true)}>
             <Plus size={18} style={{ marginRight: 8 }} />
             Add Product
@@ -479,7 +549,7 @@ export default function ProductsPage() {
               <Search size={18} className={styles.searchIcon} />
               <input 
                 type="text" 
-                placeholder="Search products, variants, attributes..." 
+                placeholder="Search products, options, attributes..." 
                 className={styles.searchInput}
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -525,7 +595,7 @@ export default function ProductsPage() {
                       <div className={styles.productStats}>
                         <div className={styles.statItem}>
                           <span className={styles.statValue}>{product.variant_count}</span>
-                          <span className={styles.statLabel}>Variants</span>
+                          <span className={styles.statLabel}>Options</span>
                         </div>
                         <div className={styles.statItem}>
                           <span className={styles.statValue}>{product.total_stock}</span>
@@ -534,7 +604,7 @@ export default function ProductsPage() {
                       </div>
 
                       <div className={styles.productActions}>
-                        <button 
+                        {canEditProducts && <button 
                           className={styles.iconBtn} 
                           title="Edit Product"
                           onClick={(e) => {
@@ -543,8 +613,8 @@ export default function ProductsPage() {
                           }}
                         >
                           <Edit2 size={14} strokeWidth={1.5}/>
-                        </button>
-                        <button 
+                        </button>}
+                        {canDeleteProducts && <button 
                           className={styles.iconBtn} 
                           title="Delete Product"
                           style={{ color: '#ef4444' }}
@@ -554,14 +624,14 @@ export default function ProductsPage() {
                           }}
                         >
                           <Trash2 size={16}/>
-                        </button>
+                        </button>}
                       </div>
                     </div>
 
                     {isExpanded && (
                       <div className={styles.variantsExpanded}>
                         <div className={styles.variantHeader}>
-                          <span>IDENTIFIER</span>
+                          <span>ITEM CODE</span>
                           <span>MANUFACTURER</span>
                           <span>ATTRIBUTES</span>
                           <span>WAREHOUSE</span>
@@ -582,12 +652,12 @@ export default function ProductsPage() {
                               <span className={styles.variantStockText}>{v.stock_data?.reduce((acc:any, s:any) => acc + s.quantity, 0) || 0}</span>
                               <span className={styles.variantFreeText}>{v.stock_data?.reduce((acc:any, s:any) => acc + s.quantity, 0) || 0}</span>
                               <div className={styles.variantRowActions}>
-                                <button className={styles.miniBtn} title="Edit Variant" onClick={() => handleOpenEditVariant(product, v)}>
+                                {canEditProducts && <button className={styles.miniBtn} title="Edit Option" onClick={() => handleOpenEditVariant(product, v)}>
                                   <Edit2 size={12}/>
-                                </button>
-                                <button className={styles.miniBtn} title="Delete Variant" style={{ color: '#ef4444' }} onClick={() => handleDeleteVariant(v.id)}>
+                                </button>}
+                                {canDeleteProducts && <button className={styles.miniBtn} title="Delete Option" style={{ color: '#ef4444' }} onClick={() => handleDeleteVariant(v.id)}>
                                   <Trash2 size={12}/>
-                                </button>
+                                </button>}
                               </div>
                           </div>
                         ))}
@@ -627,12 +697,14 @@ export default function ProductsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '2rem', marginBottom: '2rem' }}>
               <div className={styles.formGroup}>
                 <label style={{ fontSize: '0.7rem' }}>Manufacturer / Brand</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Havells, Polycab" 
-                  style={{ padding: '0.5rem 0.75rem' }}
+                <SearchableSelect
                   value={singleVariantForm.manufacturer}
-                  onChange={e => setSingleVariantForm(p => ({ ...p, manufacturer: e.target.value }))}
+                  options={manufacturerOptions}
+                  placeholder="Select brand..."
+                  searchPlaceholder="Search or add brand..."
+                  addActionLabel="Add brand"
+                  onChange={(value) => setSingleVariantForm((prev) => ({ ...prev, manufacturer: value }))}
+                  onCreateOption={createManufacturerOption}
                 />
               </div>
 
@@ -652,7 +724,7 @@ export default function ProductsPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px, 1fr))', gap: '1rem', marginBottom: '2.5rem' }}>
-               {Array.from(new Set(activeProductForSingle.variants?.flatMap(v => Object.keys(v.attributes)) || ['Size', 'Type'])).map(attrName => (
+               {Array.from(new Set((activeProductForSingle.variants?.flatMap((v: any) => Object.keys(v.attributes)) || ['Size', 'Type']) as string[])).map((attrName: string) => (
                  <div key={attrName} className={styles.formGroup}>
                    <label style={{ fontSize: '0.7rem' }}>{attrName}</label>
                    <select 
@@ -674,17 +746,27 @@ export default function ProductsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', padding: '1.25rem', background: '#f8fafc', border: '1px solid #f1f5f9', marginBottom: '2.5rem' }}>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Unit Type</label>
-                <select style={{ padding: '0.4rem 0.6rem' }} value={singleVariantForm.unit} onChange={e => setSingleVariantForm(p => ({ ...p, unit: e.target.value }))}>
-                  <option>Numbers</option>
-                  <option>Pcs</option>
-                  <option>Sets</option>
-                </select>
+                <SearchableSelect
+                  value={singleVariantForm.unit}
+                  options={unitOptions}
+                  placeholder="Select unit..."
+                  searchPlaceholder="Search or add unit..."
+                  addActionLabel="Add unit"
+                  onChange={(value) => setSingleVariantForm(p => ({ ...p, unit: value }))}
+                  onCreateOption={createUnitOption}
+                />
               </div>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Storage Warehouse</label>
-                <select style={{ padding: '0.4rem 0.6rem' }} value={singleVariantForm.warehouse} onChange={e => setSingleVariantForm(p => ({ ...p, warehouse: e.target.value }))}>
-                  {warehousesList.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                </select>
+                <SearchableSelect
+                  value={singleVariantForm.warehouse}
+                  options={warehouseOptions}
+                  placeholder="Select warehouse..."
+                  searchPlaceholder="Search or add warehouse..."
+                  addActionLabel="Add warehouse"
+                  onChange={(value) => setSingleVariantForm((prev) => ({ ...prev, warehouse: value }))}
+                  onCreateOption={createWarehouseOption}
+                />
               </div>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Opening Stock / Min Level</label>
@@ -710,7 +792,11 @@ export default function ProductsPage() {
                       await inventoryService.addVariant({
                         product_id: activeProductForSingle.id,
                         price: singleVariantForm.price,
-                        attributes: singleVariantForm.attributes,
+                        attributes: { 
+                          ...singleVariantForm.attributes, 
+                          ...(singleVariantForm.manufacturer ? { Manufacturer: singleVariantForm.manufacturer } : {}),
+                          ...(singleVariantForm.unit ? { Unit: singleVariantForm.unit } : {})
+                        },
                         warehouse: singleVariantForm.warehouse,
                         stock_quantity: singleVariantForm.quantity,
                         sku: singleVariantForm.sku
@@ -750,11 +836,14 @@ export default function ProductsPage() {
             <div style={{ display: 'grid', gridTemplateColumns: '1fr', gap: '1.25rem', marginBottom: '1.5rem' }}>
               <div className={styles.formGroup}>
                 <label style={{ fontSize: '0.7rem' }}>Manufacturer</label>
-                <input 
-                  type="text" 
-                  placeholder="e.g. Havells, Polycab" 
+                <SearchableSelect
                   value={singleVariantForm.manufacturer}
-                  onChange={e => setSingleVariantForm(p => ({ ...p, manufacturer: e.target.value }))}
+                  options={manufacturerOptions}
+                  placeholder="Select manufacturer..."
+                  searchPlaceholder="Search or add manufacturer..."
+                  addActionLabel="Add manufacturer"
+                  onChange={(value) => setSingleVariantForm((prev) => ({ ...prev, manufacturer: value }))}
+                  onCreateOption={createManufacturerOption}
                 />
               </div>
             </div>
@@ -767,8 +856,8 @@ export default function ProductsPage() {
                {Object.keys(activeVariantForEdit.attributes).map(attrName => {
                  // UNIVERSAL SCRAPER: Gather all values across ALL products for THIS attribute name
                  const globalPresets = attributes.find(a => a.name.toLowerCase() === attrName.toLowerCase())?.values || [];
-                 const catalogValues = products.flatMap(p => 
-                  p.variants?.flatMap(v => (v.attributes as any)[attrName] || []) || []
+                 const catalogValues = products.flatMap((p: any) => 
+                  p.variants?.flatMap((v: any) => (v.attributes as any)[attrName] || []) || []
                  );
                  
                  // Merge global presets with everything found in the catalog
@@ -802,17 +891,27 @@ export default function ProductsPage() {
             <div className={styles.footerSection}>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Unit</label>
-                <select className={styles.formSelectCompact} value={singleVariantForm.unit} onChange={e => setSingleVariantForm(p => ({ ...p, unit: e.target.value }))}>
-                  <option>Numbers</option>
-                  <option>Pcs</option>
-                  <option>Sets</option>
-                </select>
+                <SearchableSelect
+                  value={singleVariantForm.unit}
+                  options={unitOptions}
+                  placeholder="Select unit..."
+                  searchPlaceholder="Search or add unit..."
+                  addActionLabel="Add unit"
+                  onChange={(value) => setSingleVariantForm(p => ({ ...p, unit: value }))}
+                  onCreateOption={createUnitOption}
+                />
               </div>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Warehouse</label>
-                <select className={styles.formSelectCompact} value={singleVariantForm.warehouse} onChange={e => setSingleVariantForm(p => ({ ...p, warehouse: e.target.value }))}>
-                  {warehousesList.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                </select>
+                <SearchableSelect
+                  value={singleVariantForm.warehouse}
+                  options={warehouseOptions}
+                  placeholder="Select warehouse..."
+                  searchPlaceholder="Search or add warehouse..."
+                  addActionLabel="Add warehouse"
+                  onChange={(value) => setSingleVariantForm((prev) => ({ ...prev, warehouse: value }))}
+                  onCreateOption={createWarehouseOption}
+                />
               </div>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Min Stock</label>
@@ -835,24 +934,44 @@ export default function ProductsPage() {
                   style={{ background: 'var(--accent-primary)', fontSize: '0.85rem', padding: '0.7rem 3rem' }}
                   onClick={async () => {
                     try {
-                      // 1. Update Variant details
+                       // 1. Update Variant details
                       const { error: vError } = await supabase.from('variants').update({
-                        brand: singleVariantForm.manufacturer,
                         price: singleVariantForm.price,
-                        attributes: singleVariantForm.attributes,
+                        attributes: { 
+                          ...singleVariantForm.attributes, 
+                          ...(singleVariantForm.manufacturer ? { Manufacturer: singleVariantForm.manufacturer } : {}),
+                          ...(singleVariantForm.unit ? { Unit: singleVariantForm.unit } : {})
+                        },
                       }).eq('id', activeVariantForEdit.id);
                       if (vError) throw vError;
 
                       // 2. Update Stock/Warehouse details
-                      // Find the warehouse ID from the selection name
                       const targetWarehouse = warehousesList.find(w => w.name === singleVariantForm.warehouse);
                       
-                      const { error: sError } = await supabase.from('inventory').update({
-                        quantity: singleVariantForm.quantity,
-                        warehouse_id: targetWarehouse?.id || null
-                      }).eq('variant_id', activeVariantForEdit.id);
-                      
-                      if (sError) throw sError;
+                      if (targetWarehouse?.id) {
+                        const { data: existingInv } = await supabase.from('inventory')
+                          .select('id')
+                          .eq('variant_id', activeVariantForEdit.id)
+                          .maybeSingle();
+
+                        if (existingInv) {
+                          const { error: sError } = await supabase.from('inventory')
+                            .update({
+                              quantity: singleVariantForm.quantity,
+                              warehouse_id: targetWarehouse.id
+                            })
+                            .eq('id', existingInv.id);
+                          if (sError) throw sError;
+                        } else {
+                          const { error: sError } = await supabase.from('inventory')
+                            .insert({
+                              variant_id: activeVariantForEdit.id,
+                              warehouse_id: targetWarehouse.id,
+                              quantity: singleVariantForm.quantity
+                            });
+                          if (sError) throw sError;
+                        }
+                      }
 
                       setIsEditingVariant(false);
                       fetchProducts();
@@ -925,162 +1044,42 @@ export default function ProductsPage() {
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
                     <label><Tag size={18} strokeWidth={1.5} color="#a855f7" /> Category</label>
-                    <div className={styles.customSelectWrapper}>
-                      <div 
-                        className={styles.formSelect} 
-                        onClick={() => setIsCategoryOpen(!isCategoryOpen)}
-                      >
-                        {category || "Select Category..."}
-                      </div>
-                      {isCategoryOpen && (
-                        <div className={styles.selectDropdown}>
-                          <div className={styles.selectSearch}>
-                            <Search size={14} />
-                            <input 
-                              placeholder="Search..." 
-                              onClick={e => e.stopPropagation()}
-                              value={categorySearch}
-                              onChange={e => setCategorySearch(e.target.value)}
-                            />
-                          </div>
-                          <div className={styles.selectOptions}>
-                            {categoriesList
-                              .filter(c => c.toLowerCase().includes(categorySearch.toLowerCase()))
-                              .map(c => (
-                              <div 
-                                key={c} 
-                                className={styles.selectOption}
-                                onClick={() => {
-                                  setCategory(c);
-                                  setIsCategoryOpen(false);
-                                  setCategorySearch(''); // Reset on select
-                                }}
-                              >
-                                {c}
-                              </div>
-                            ))}
-                            <div 
-                              className={`${styles.selectOption} ${styles.addNewOption}`}
-                              onClick={() => {
-                                setModalType('category');
-                                setModalValue('');
-                                setIsModalOpen(true);
-                                setIsCategoryOpen(false);
-                              }}
-                            >
-                              + Add New Category
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <SearchableSelect
+                      value={category}
+                      options={categoryOptions}
+                      placeholder="Select category..."
+                      searchPlaceholder="Search or add category..."
+                      addActionLabel="Add category"
+                      onChange={setCategory}
+                      onCreateOption={createCategoryOption}
+                    />
                   </div>
 
                   <div className={styles.formGroup}>
                     <label><History size={18} strokeWidth={1.5} color="#f97316" /> Brand / Manufacturer</label>
-                    <div className={styles.customSelectWrapper}>
-                      <div 
-                        className={styles.formSelect} 
-                        onClick={() => setIsManufacturerOpen(!isManufacturerOpen)}
-                      >
-                        {manufacturer || "Select Brand..."}
-                      </div>
-                      {isManufacturerOpen && (
-                        <div className={styles.selectDropdown}>
-                          <div className={styles.selectSearch}>
-                            <Search size={14} />
-                            <input 
-                              placeholder="Search brands..." 
-                              onClick={e => e.stopPropagation()}
-                              value={manufacturerSearch}
-                              onChange={e => setManufacturerSearch(e.target.value)}
-                            />
-                          </div>
-                          <div className={styles.selectOptions}>
-                            {manufacturersList
-                              .filter(m => m.name.toLowerCase().includes(manufacturerSearch.toLowerCase()))
-                              .map(m => (
-                              <div 
-                                key={m.id} 
-                                className={styles.selectOption}
-                                onClick={() => {
-                                  setManufacturer(m.name);
-                                  setIsManufacturerOpen(false);
-                                  setManufacturerSearch(''); // Reset
-                                }}
-                              >
-                                {m.name}
-                              </div>
-                            ))}
-                            <div 
-                              className={`${styles.selectOption} ${styles.addNewOption}`}
-                              onClick={() => {
-                                setModalType('manufacturer');
-                                setModalValue('');
-                                setIsModalOpen(true);
-                                setIsManufacturerOpen(false);
-                              }}
-                            >
-                              + Add New Brand
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <SearchableSelect
+                      value={manufacturer}
+                      options={manufacturerOptions}
+                      placeholder="Select brand..."
+                      searchPlaceholder="Search or add brand..."
+                      addActionLabel="Add brand"
+                      onChange={setManufacturer}
+                      onCreateOption={createManufacturerOption}
+                    />
                   </div>
                 </div>
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
                     <label><Layers size={18} strokeWidth={1.5} color="#06b6d4" /> Main Warehouse</label>
-                    <div className={styles.customSelectWrapper}>
-                      <div 
-                        className={styles.formSelect} 
-                        onClick={() => setIsWarehouseOpen(!isWarehouseOpen)}
-                      >
-                        {selectedWarehouse || "Select Warehouse..."}
-                      </div>
-                      {isWarehouseOpen && (
-                        <div className={styles.selectDropdown}>
-                          <div className={styles.selectSearch}>
-                            <Search size={14} />
-                            <input 
-                              placeholder="Search warehouses..." 
-                              onClick={e => e.stopPropagation()}
-                              value={warehouseSearch}
-                              onChange={e => setWarehouseSearch(e.target.value)}
-                            />
-                          </div>
-                          <div className={styles.selectOptions}>
-                            {warehousesList
-                              .filter(w => w.name.toLowerCase().includes(warehouseSearch.toLowerCase()))
-                              .map(w => (
-                              <div 
-                                key={w.id} 
-                                className={styles.selectOption}
-                                onClick={() => {
-                                  setSelectedWarehouse(w.name);
-                                  setIsWarehouseOpen(false);
-                                  setWarehouseSearch(''); 
-                                }}
-                              >
-                                {w.name}
-                              </div>
-                            ))}
-                            <div 
-                              className={`${styles.selectOption} ${styles.addNewOption}`}
-                              onClick={() => {
-                                setModalType('warehouse');
-                                setModalValue('');
-                                setIsModalOpen(true);
-                                setIsWarehouseOpen(false);
-                              }}
-                            >
-                              + Add New Warehouse
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
+                    <SearchableSelect
+                      value={selectedWarehouse}
+                      options={warehouseOptions}
+                      placeholder="Select warehouse..."
+                      searchPlaceholder="Search or add warehouse..."
+                      addActionLabel="Add warehouse"
+                      onChange={setSelectedWarehouse}
+                      onCreateOption={createWarehouseOption}
+                    />
                   </div>
                   <div className={styles.formGroup} style={{ visibility: 'hidden' }}>
                     {/* Placeholder for grid alignment */}
@@ -1376,28 +1375,51 @@ export default function ProductsPage() {
       {/* Delete Reason Modal - Audit compliant */}
       {isDeleteModalOpen && (
         <div className={styles.modalOverlay}>
-          <div className={styles.minimalModal} style={{ maxWidth: '400px' }}>
-            <h2 className={styles.modalTitle} style={{ color: 'var(--danger)', fontSize: '1.25rem' }}>Confirm Deletion</h2>
-            <p className={styles.modalSubtitle} style={{ fontSize: '0.8rem' }}>Please provide a reason for deleting this variant. This action is irreversible.</p>
-            
-            <div className={styles.formGroup} style={{ marginBottom: '1.5rem' }}>
-              <label style={{ fontSize: '0.7rem' }}>REASON FOR DELETION</label>
-              <textarea 
-                placeholder="e.g. Discontinued, Accidental Creation, Damaged Stock..."
-                value={deleteReason}
-                onChange={e => setDeleteReason(e.target.value)}
-                style={{ minHeight: '100px', fontSize: '0.85rem', width: '100%', padding: '0.75rem', border: '1px solid var(--border-color)', borderRadius:'0' }}
-              />
+          <div className={styles.deleteVariantModal}>
+            <div className={styles.deleteModalHeader}>
+              <div className={styles.deleteModalIcon}>
+                <Trash2 size={20} strokeWidth={1.5} />
+              </div>
+              <div className={styles.deleteModalHeaderText}>
+                <h2 className={styles.deleteModalTitle}>Delete Variant</h2>
+                <p className={styles.deleteModalSub}>Permanent · Audit-tracked</p>
+              </div>
+              <button className={styles.deleteModalClose} onClick={() => setIsDeleteModalOpen(false)}>
+                <X size={16} strokeWidth={2} />
+              </button>
             </div>
 
-            <div className={styles.modalActions} style={{ display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
-              <button className={styles.secondaryBtn} onClick={() => setIsDeleteModalOpen(false)}>Cancel</button>
-              <button 
-                className={styles.wizardNextBtn} 
-                style={{ background: 'var(--danger)', padding: '0.6rem 2rem', fontSize: '0.8rem' }}
+            <div className={styles.deleteModalBody}>
+              <div className={styles.deleteModalAlert}>
+                <AlertCircle size={13} strokeWidth={2} style={{ flexShrink: 0 }} />
+                <span>Provide a reason for deletion. This entry is recorded in the audit log and cannot be reversed.</span>
+              </div>
+
+              <div className={styles.formGroup} style={{ marginBottom: 0 }}>
+                <label style={{ fontSize: '0.65rem', color: '#b91c1c', letterSpacing: '0.08em' }}>
+                  REASON FOR DELETION <span style={{ color: '#dc2626' }}>*</span>
+                </label>
+                <textarea
+                  placeholder="e.g. Discontinued, Accidental Creation, Damaged Stock..."
+                  value={deleteReason}
+                  onChange={e => setDeleteReason(e.target.value)}
+                  className={styles.deleteReasonArea}
+                  rows={3}
+                />
+              </div>
+            </div>
+
+            <div className={styles.deleteModalFooter}>
+              <button className={styles.wizardBackBtn} onClick={() => setIsDeleteModalOpen(false)}>
+                Cancel
+              </button>
+              <button
+                className={styles.deleteConfirmBtn}
                 onClick={confirmDeleteVariant}
+                disabled={!deleteReason.trim()}
               >
-                Delete Variant
+                <Trash2 size={13} strokeWidth={2} />
+                Confirm Delete
               </button>
             </div>
           </div>
@@ -1412,13 +1434,15 @@ export default function ProductsPage() {
               <X size={18} />
             </button>
             <h3 className={styles.modalTitle}>
-              Add New {modalType === 'category' ? 'Category' : modalType === 'manufacturer' ? 'Brand' : modalType === 'warehouse' ? 'Warehouse' : 'Attribute Type'}
+              Add New {modalType === 'category' ? 'Category' : modalType === 'manufacturer' ? 'Brand' : modalType === 'warehouse' ? 'Warehouse' : modalType === 'unit' ? 'Unit' : 'Attribute Type'}
             </h3>
             <p className={styles.modalSubtitle}>
               {modalType === 'attribute' 
                 ? 'Create a new dimension (e.g. VOLTAGE, PATTERN) for your variants.' 
                 : modalType === 'warehouse'
                 ? 'Add a new location to your inventory network.'
+                : modalType === 'unit'
+                ? 'Add a new unit so it is immediately available across inventory screens.'
                 : 'This will be available in the dropdown immediately.'}
             </p>
             <div className={styles.formGroup} style={{ marginBottom: '2rem' }}>
@@ -1427,7 +1451,7 @@ export default function ProductsPage() {
                 type="text" 
                 value={modalValue} 
                 onChange={e => setModalValue(e.target.value.toUpperCase())}
-                placeholder={modalType === 'attribute' ? 'e.g. FITTING TYPE' : modalType === 'warehouse' ? 'e.g. MAIN STORE A' : `Enter new ${modalType}...`}
+                placeholder={modalType === 'attribute' ? 'e.g. FITTING TYPE' : modalType === 'warehouse' ? 'e.g. MAIN STORE A' : modalType === 'unit' ? 'e.g. BOXES' : `Enter new ${modalType}...`}
               />
             </div>
             <div className={styles.modalActions}>
@@ -1440,16 +1464,18 @@ export default function ProductsPage() {
                   if (!modalValue) return;
                   try {
                     if (modalType === 'category') {
-                      setCategoriesList(prev => [...new Set([...prev, modalValue])]);
-                      setCategory(modalValue);
+                      const newCategory = await createCategoryOption(modalValue);
+                      setCategory(newCategory);
                     } else if (modalType === 'manufacturer') {
-                      const newMfg = await (inventoryService as any).createManufacturer(modalValue);
-                      setManufacturersList(prev => [...prev, newMfg]);
-                      setManufacturer(modalValue);
+                      const newMfg = await createManufacturerOption(modalValue);
+                      setManufacturer(newMfg);
                     } else if (modalType === 'warehouse') {
-                      const newWh = await (inventoryService as any).createWarehouse(modalValue);
-                      setWarehousesList(prev => [...prev, newWh]);
-                      setSelectedWarehouse(modalValue);
+                      const newWh = await createWarehouseOption(modalValue);
+                      setSelectedWarehouse(newWh);
+                    } else if (modalType === 'unit') {
+                      const newUnit = await createUnitOption(modalValue);
+                      setSingleVariantForm(prev => ({ ...prev, unit: newUnit }));
+                      setGenDefaultSettings(prev => ({ ...prev, unit: newUnit }));
                     } else if (modalType === 'attribute') {
                       setUserDefinedAttributes(prev => [...prev, { name: modalValue, values: [] }]);
                       setAttributes(prev => [...prev, { name: modalValue, values: [] }]);
@@ -1597,19 +1623,18 @@ export default function ProductsPage() {
               {generateStep === 2 && (
                 <div className={styles.genInner}>
                   <p className={styles.genBodyInfo}>Add manufacturers. You can add multiple brands to multiply the generated combinations.</p>
-                  <div className={styles.genInputGroup} style={{ maxWidth: '600px', margin: '2rem auto' }}>
-                    <input 
-                      placeholder="Type manufacturer name..." 
-                      onKeyDown={(e: any) => {
-                        if (e.key === 'Enter' && e.target.value) {
-                          setGenManufacturers(prev => [...new Set([...prev, e.target.value.toUpperCase()])]);
-                          e.target.value = '';
-                        }
+                  <div style={{ maxWidth: '600px', margin: '1.25rem auto' }}>
+                    <SearchableSelect
+                      value=""
+                      options={manufacturerOptions}
+                      placeholder="Select manufacturer to add..."
+                      searchPlaceholder="Search or add manufacturer..."
+                      addActionLabel="Add manufacturer"
+                      onChange={(value) => {
+                        setGenManufacturers((prev) => [...new Set([...prev, value])]);
                       }}
+                      onCreateOption={createManufacturerOption}
                     />
-                    <button className={styles.genAddBtn} style={{ background: '#4f46e5', color: 'white', border: 'none' }}>
-                      <Plus size={16} />
-                    </button>
                   </div>
                   <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', justifyContent: 'center' }}>
                     {genManufacturers.map(m => (
@@ -1635,17 +1660,27 @@ export default function ProductsPage() {
                   <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', marginBottom: '2rem', padding: '1.5rem', background: '#f8fafc', border: '1px solid #f1f5f9' }}>
                     <div className={styles.formGroup}>
                       <label>DEFAULT UNIT</label>
-                      <select value={genDefaultSettings.unit} onChange={e => setGenDefaultSettings(p => ({ ...p, unit: e.target.value }))}>
-                        <option>Numbers</option>
-                        <option>Sets</option>
-                        <option>Pcs</option>
-                      </select>
+                      <SearchableSelect
+                        value={genDefaultSettings.unit}
+                        options={unitOptions}
+                        placeholder="Select unit..."
+                        searchPlaceholder="Search or add unit..."
+                        addActionLabel="Add unit"
+                        onChange={(value) => setGenDefaultSettings(p => ({ ...p, unit: value }))}
+                        onCreateOption={createUnitOption}
+                      />
                     </div>
                     <div className={styles.formGroup}>
                       <label>DEFAULT WAREHOUSE</label>
-                      <select value={genDefaultSettings.warehouse} onChange={e => setGenDefaultSettings(p => ({ ...p, warehouse: e.target.value }))}>
-                        {warehousesList.map(w => <option key={w.id} value={w.name}>{w.name}</option>)}
-                      </select>
+                      <SearchableSelect
+                        value={genDefaultSettings.warehouse}
+                        options={warehouseOptions}
+                        placeholder="Select warehouse..."
+                        searchPlaceholder="Search or add warehouse..."
+                        addActionLabel="Add warehouse"
+                        onChange={(value) => setGenDefaultSettings((prev) => ({ ...prev, warehouse: value }))}
+                        onCreateOption={createWarehouseOption}
+                      />
                     </div>
                     <div className={styles.formGroup}>
                       <label>MIN STOCK LEVEL</label>
@@ -1760,7 +1795,11 @@ export default function ProductsPage() {
 
                           const variantsToCreate = combinations.map(c => ({
                             sku: `${activeProductForSingle?.name.substring(0,3).toUpperCase()}-${Object.values(c.attributes).join('-').toUpperCase()}-${c.brand.substring(0,3).toUpperCase()}`.replace(/--+/g,'-'),
-                            attributes: c.attributes,
+                            attributes: {
+                              ...c.attributes,
+                              ...(c.brand !== '-' ? { Manufacturer: c.brand } : {}),
+                              ...(genDefaultSettings.unit ? { Unit: genDefaultSettings.unit } : {}),
+                            },
                             brand: c.brand === '-' ? '' : c.brand,
                             price: 0
                           }));

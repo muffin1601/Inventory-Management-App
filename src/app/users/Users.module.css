@@ -104,7 +104,7 @@
 
 .searchInput {
   width: 100%;
-  background: rgba(0,0,0,0.2);
+  background: #ffffff;
   border: 1px solid var(--border-color);
   padding: 10px 12px 10px 38px;
   border-radius: var(--radius-md);
@@ -124,12 +124,12 @@
   font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
-  background: rgba(255,255,255,0.02);
+  background: #f8fafc;
 }
 
 .table td {
   padding: 1rem 1.5rem;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border-color);
   font-size: 0.95rem;
   vertical-align: middle;
 }
@@ -231,13 +231,13 @@
   align-items: center;
   gap: 12px;
   font-weight: 500;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border-color);
   cursor: pointer;
   transition: background 0.2s;
 }
 
 .roleItem:hover {
-  background: rgba(255,255,255,0.02);
+  background: #f8fafc;
 }
 
 .roleActive {
@@ -304,7 +304,7 @@
   justify-content: space-between;
   align-items: center;
   padding: 12px 0;
-  border-bottom: 1px solid var(--glass-border);
+  border-bottom: 1px solid var(--border-color);
 }
 
 .saveBtn {

@@ -1,0 +1,104 @@
+.toastStack {
+  position: fixed;
+  right: 1rem;
+  top: 1rem;
+  z-index: 9999;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.toast {
+  min-width: 240px;
+  max-width: 360px;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border-color);
+  background: #fff;
+  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+}
+
+.success {
+  border-left: 3px solid #16a34a;
+}
+
+.error {
+  border-left: 3px solid #dc2626;
+}
+
+.info {
+  border-left: 3px solid var(--accent-primary);
+}
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(15, 23, 42, 0.28);
+  z-index: 9998;
+  display: grid;
+  place-items: center;
+}
+
+.dialog {
+  width: min(460px, 90vw);
+  background: #fff;
+  border: 1px solid var(--border-color);
+  padding: 1rem;
+}
+
+.dialog h3 {
+  font-size: 1rem;
+  margin-bottom: 0.5rem;
+}
+
+.dialog p {
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+}
+
+.reasonBlock {
+  margin-bottom: 1rem;
+}
+
+.reasonLabel {
+  display: block;
+  margin-bottom: 0.35rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.reasonInput {
+  width: 100%;
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: var(--text-primary);
+  padding: 0.65rem 0.75rem;
+  resize: vertical;
+  min-height: 92px;
+}
+
+.dialogActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+}
+
+.secondaryBtn,
+.primaryBtn {
+  padding: 0.45rem 0.8rem;
+  border: 1px solid var(--border-color);
+  background: #fff;
+}
+
+.primaryBtn {
+  border-color: var(--accent-primary);
+  background: var(--accent-primary);
+  color: #fff;
+}
+
+.primaryBtn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
