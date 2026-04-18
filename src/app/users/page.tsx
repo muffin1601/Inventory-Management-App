@@ -99,7 +99,7 @@ export default function UsersPage() {
       reasonPlaceholder: 'Why are you changing this user status?',
     });
     if (!confirmation.confirmed) return;
-    const next = users.map((user) =>
+    const next: UserAccessRow[] = users.map((user) =>
       user.id === userId ? { ...user, status: user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE' } : user,
     );
     const changedUser = users.find((user) => user.id === userId);

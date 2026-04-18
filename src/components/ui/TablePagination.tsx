@@ -28,7 +28,7 @@ export default function TablePagination({
   const start = (currentPage - 1) * pageSize + 1;
   const end = Math.min(currentPage * pageSize, totalItems);
 
-  const visiblePages = [];
+  const visiblePages: number[] = [];
   const windowStart = Math.max(1, currentPage - 1);
   const windowEnd = Math.min(totalPages, windowStart + 2);
 

@@ -157,16 +157,9 @@ async function pickBoqTable(): Promise<(typeof BOQ_TABLE_CANDIDATES)[number] | n
 
 export const projectsService = {
   async listProjects(): Promise<{ source: DataSource; projects: ProjectRecord[]; warning?: string }> {
-    const response = await supabase.from('projects').select('*').is('deleted_at', null);
+    const response = await supabase.from('projects').select('*');
 
     if (response.error) {
-      if (isMissingColumnError(response.error)) {
-        const fallback = await supabase.from('projects').select('*');
-        if (!fallback.error) {
-          const normalized = (fallback.data || []).map((row) => normalizeProject(row as Record<string, unknown>));
-          return { source: 'supabase', projects: normalized.filter((row) => row.id && row.name) };
-        }
-      }
       if (isMissingTableError(response.error)) {
         return {
           source: 'local',
@@ -183,7 +176,12 @@ export const projectsService = {
     }
 
     const normalized = (response.data || []).map((row) => normalizeProject(row as Record<string, unknown>));
-    return { source: 'supabase', projects: normalized.filter((row) => row.id && row.name) };
+    const filtered = (response.data || []).map((row, index) => ({ raw: row as Record<string, unknown>, normalized: normalized[index] }))
+      .filter((item) => item.normalized.id && item.normalized.name)
+      .filter((item) => item.raw.deleted_at == null)
+      .map((item) => item.normalized);
+
+    return { source: 'supabase', projects: filtered };
   },
 
   async createProject(input: { name: string; client_name: string; delivery_address?: string; code?: string }) {

@@ -255,7 +255,7 @@ export default function ProductsPage() {
 
     setSingleVariantForm({
       sku: variant.sku,
-      manufacturer: variant.brand || '',
+      manufacturer: variant.attributes.Manufacturer || '',
       price: variant.price || 0,
       attributes: variant.attributes || {},
       warehouse: currentWarehouse,
@@ -642,7 +642,7 @@ export default function ProductsPage() {
                         {product.variants?.map((v: any) => (
                           <div key={v.id} className={styles.variantRow}>
                               <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{v.sku}</div>
-                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{v.brand || '-'}</div>
+                              <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{v.attributes.Manufacturer || '-'}</div>
                               <div className={styles.variantAttrs}>
                                 {Object.entries(v.attributes).map(([k, val]) => (
                                   <span key={k}>{val as string}</span>
@@ -952,6 +952,7 @@ export default function ProductsPage() {
                         const { data: existingInv } = await supabase.from('inventory')
                           .select('id')
                           .eq('variant_id', activeVariantForEdit.id)
+                          .eq('warehouse_id', targetWarehouse.id)
                           .maybeSingle();
 
                         if (existingInv) {
@@ -1331,7 +1332,7 @@ export default function ProductsPage() {
                           <div className={styles.variantDetails}>
                             <div className={styles.variantSku}>{v.sku}</div>
                             <div className={styles.variantAttrs}>
-                              <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>{v.brand || 'No Brand'}</span>
+                              <span style={{ color: 'var(--accent-primary)', fontWeight: 500 }}>{v.attributes.Manufacturer || 'No Brand'}</span>
                               {Object.entries(v.attributes).map(([k, val]) => (
                                 <span key={k}>{val as string}</span>
                               ))}

@@ -189,7 +189,7 @@ export default function StockPage() {
       .filter((order) => order.status === 'PENDING' && order.type === 'SALE')
       .forEach((order) => {
         const key = `${order.variant_id}::${order.warehouse_id}`;
-        next.set(key, (next.get(key) || 0) + order.quantity);
+        next.set(key, (next.get(key) || 0) + (order.quantity || 0));
       });
 
     return next;

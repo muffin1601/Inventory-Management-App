@@ -49,7 +49,7 @@ export const seedMockData = async () => {
     const combinations = generateCombinations(product.attributes);
     const variants = combinations.map(combo => {
       const prefix = product.name.substring(0, 3).toUpperCase();
-      const attrStr = Object.values(combo).map(v => v.toString().substring(0, 3).toUpperCase()).join('-');
+      const attrStr = Object.values(combo).map((v: unknown) => (v as string).toString().substring(0, 3).toUpperCase()).join('-');
       return {
         sku: `${prefix}-${attrStr}-${Date.now().toString().slice(-4)}`,
         attributes: combo,

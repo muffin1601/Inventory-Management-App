@@ -17,7 +17,7 @@ type VendorRecord = {
   contact_person?: string | null;
   phone?: string | null;
   email?: string | null;
-  city?: string | null;
+  delivery_address?: string | null;
   gstin?: string | null;
   payment_terms?: string | null;
   created_at?: string | null;
@@ -28,7 +28,7 @@ type VendorFormState = {
   contact_person: string;
   phone: string;
   email: string;
-  city: string;
+  address: string;
   gstin: string;
   payment_terms: string;
   status: VendorStatus;
@@ -42,7 +42,7 @@ const EMPTY_FORM: VendorFormState = {
   contact_person: '',
   phone: '',
   email: '',
-  city: '',
+  address: '',
   gstin: '',
   payment_terms: 'Immediate',
   status: 'ACTIVE',
@@ -56,7 +56,14 @@ function normalizeVendor(row: Record<string, unknown>): VendorRecord {
     contact_person: typeof row.contact_person === 'string' ? row.contact_person : '',
     phone: typeof row.phone === 'string' ? row.phone : '',
     email: typeof row.email === 'string' ? row.email : '',
-    city: typeof row.city === 'string' ? row.city : '',
+    delivery_address:
+      typeof row.delivery_address === 'string'
+        ? row.delivery_address
+        : typeof row.address === 'string'
+        ? row.address
+        : typeof row.city === 'string'
+        ? row.city
+        : '',
     gstin: typeof row.gstin === 'string' ? row.gstin : '',
     payment_terms: typeof row.payment_terms === 'string' ? row.payment_terms : '',
     created_at: typeof row.created_at === 'string' ? row.created_at : '',
@@ -86,7 +93,7 @@ function buildVendorPayload(form: VendorFormState) {
     contact_person: form.contact_person.trim(),
     phone: form.phone.trim(),
     email: form.email.trim(),
-    city: form.city.trim(),
+    delivery_address: form.address.trim(),
     gstin: form.gstin.trim(),
     payment_terms: form.payment_terms.trim(),
   };
@@ -145,7 +152,7 @@ export default function VendorsPage() {
         (vendor.contact_person || '').toLowerCase().includes(query) ||
         (vendor.email || '').toLowerCase().includes(query) ||
         (vendor.phone || '').toLowerCase().includes(query) ||
-        (vendor.city || '').toLowerCase().includes(query);
+        (vendor.delivery_address || '').toLowerCase().includes(query);
       const matchesStatus = statusFilter === 'ALL' || vendor.status === statusFilter;
       return matchesSearch && matchesStatus;
     });
@@ -173,7 +180,7 @@ export default function VendorsPage() {
       contact_person: vendor.contact_person || '',
       phone: vendor.phone || '',
       email: vendor.email || '',
-      city: vendor.city || '',
+      address: vendor.delivery_address || '',
       gstin: vendor.gstin || '',
       payment_terms: vendor.payment_terms || 'Immediate',
       status: vendor.status,
@@ -215,7 +222,7 @@ export default function VendorsPage() {
             contact_person: payload.contact_person,
             phone: payload.phone,
             email: payload.email,
-            city: payload.city,
+            delivery_address: payload.delivery_address,
             gstin: payload.gstin,
             payment_terms: payload.payment_terms,
           },
@@ -238,7 +245,7 @@ export default function VendorsPage() {
                 contact_person: payload.contact_person,
                 phone: payload.phone,
                 email: payload.email,
-                city: payload.city,
+                delivery_address: payload.delivery_address,
                 gstin: payload.gstin,
                 payment_terms: payload.payment_terms,
               },
@@ -256,7 +263,7 @@ export default function VendorsPage() {
                 contact_person: payload.contact_person,
                 phone: payload.phone,
                 email: payload.email,
-                city: payload.city,
+                delivery_address: payload.delivery_address,
                 gstin: payload.gstin,
                 payment_terms: payload.payment_terms,
               },
@@ -385,7 +392,7 @@ export default function VendorsPage() {
             <input
               type="text"
               className={styles.searchInput}
-              placeholder="Search vendor, contact, phone, or city..."
+              placeholder="Search vendor, contact, phone, or address..."
               value={search}
               onChange={(event) => setSearch(event.target.value)}
             />
@@ -442,8 +449,8 @@ export default function VendorsPage() {
                   </div>
                 </td>
                 <td>
-                  {vendor.city ? (
-                    <span className={styles.metaLine}><MapPin size={13} /> {vendor.city}</span>
+                  {vendor.delivery_address ? (
+                    <span className={styles.metaLine}><MapPin size={13} /> {vendor.delivery_address}</span>
                   ) : (
                     <span className={styles.metaText}>Not set</span>
                   )}
@@ -510,8 +517,8 @@ export default function VendorsPage() {
                 <input value={form.phone} onChange={(event) => setForm((prev) => ({ ...prev, phone: event.target.value }))} placeholder="Phone number" />
               </div>
               <div className={styles.formGroup}>
-                <label>City</label>
-                <input value={form.city} onChange={(event) => setForm((prev) => ({ ...prev, city: event.target.value }))} placeholder="City" />
+                <label>Address</label>
+                <input value={form.address} onChange={(event) => setForm((prev) => ({ ...prev, address: event.target.value }))} placeholder="Address" />
               </div>
               <div className={styles.formGroup}>
                 <label>GSTIN / Tax ID</label>

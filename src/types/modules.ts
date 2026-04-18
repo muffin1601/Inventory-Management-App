@@ -34,6 +34,9 @@ export interface OrderLine {
   unit?: string;
   quantity: number;
   price?: number;
+  gst_rate?: number;
+  gst_amount?: number;
+  total_price?: number;
   warehouse_id?: string;
   warehouse_name?: string;
 }
