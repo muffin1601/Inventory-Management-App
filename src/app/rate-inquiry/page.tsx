@@ -171,7 +171,7 @@ function RateInquiryContent() {
         }
 
         if (data && data.length > 0) {
-          const formatted = data.map(v => ({
+          const formatted = data.map((v: any) => ({
             id: v.id,
             name: v.name,
             payment_terms: v.payment_terms || savedDetails[v.id]?.payment_terms || '30 Days',
