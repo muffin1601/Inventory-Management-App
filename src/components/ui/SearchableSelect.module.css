@@ -26,7 +26,7 @@
 }
 
 .placeholder {
-  color: #94a3b8;
+  color: #9ca3af;
 }
 
 .value {
@@ -36,7 +36,7 @@
 .icon,
 .iconOpen {
   color: var(--text-secondary);
-  transition: transform 0.2s ease;
+  transition: none;
 }
 
 .iconOpen {
@@ -51,7 +51,7 @@
   z-index: 20;
   background: #ffffff;
   border: 1px solid var(--border-color);
-  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
+  box-shadow: none;
 }
 
 .searchRow {
@@ -102,25 +102,25 @@
   width: 100%;
   text-align: left;
   padding: 0.62rem 0.75rem;
-  border-bottom: 1px solid #f1f5f9;
+  border-bottom: 1px solid #e5e7eb;
   background: #ffffff;
   font-size: 0.82rem;
 }
 
 .option:hover,
 .optionActive {
-  background: #f8fafc;
-  color: var(--accent-primary);
+  background: #f3f4f6;
+  color: #111111;
 }
 
 .addOption {
-  color: var(--accent-primary);
+  color: #111111;
   font-weight: 600;
-  background: #f8fafc;
+  background: #f3f4f6;
 }
 
 .addOption:hover:not(:disabled) {
-  background: #f8fafc;
+  background: #f3f4f6;
 }
 
 .addOption:disabled {

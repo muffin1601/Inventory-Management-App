@@ -2,7 +2,7 @@
 
 import styles from './Layout.module.css';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useSearchParams } from 'next/navigation';
 import {
   Home,
   Box,
@@ -13,6 +13,7 @@ import {
   Scale,
   ShoppingCart,
   FileText,
+  Package,
   Truck,
   CreditCard,
   UploadCloud,
@@ -26,46 +27,45 @@ import React from 'react';
 
 export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
 
   const navGroups = [
     {
       label: 'Main',
       items: [
-        { name: 'Dashboard', path: '/dashboard', icon: <Home size={18} strokeWidth={1.5} color="#6366f1" /> },
+        { name: 'Dashboard', path: '/dashboard', icon: <Home size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
     {
       label: 'Inventory & Projects',
       items: [
-        { name: 'Item Catalog', path: '/catalog', icon: <Box size={18} strokeWidth={1.5} color="#ec4899" /> },
-        { name: 'Stock Management', path: '/stock', icon: <Boxes size={18} strokeWidth={1.5} color="#8b5cf6" /> },
-        { name: 'Inventory Flow', path: '/inventory', icon: <ArrowRightLeft size={18} strokeWidth={1.5} color="#14b8a6" /> },
-        { name: 'Projects & BOQ', path: '/projects', icon: <Building2 size={18} strokeWidth={1.5} color="#06b6d4" /> },
+        { name: 'Item Catalog', path: '/catalog', icon: <Box size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Stock Management', path: '/stock', icon: <Boxes size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Inventory Flow', path: '/inventory', icon: <ArrowRightLeft size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Projects & BOQ', path: '/projects', icon: <Building2 size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
     {
       label: 'Procurement',
       items: [
-        { name: 'Vendors', path: '/vendors', icon: <Users size={18} strokeWidth={1.5} color="#f59e0b" /> },
-        { name: 'Purchase Orders', path: '/orders', icon: <ShoppingCart size={18} strokeWidth={1.5} color="#ef4444" /> },
-        { name: 'Rate Inquiry', path: '/rate-inquiry', icon: <ClipboardList size={18} strokeWidth={1.5} color="#10b981" /> },
-        { name: 'Rate Comparison', path: '/rate-comparison', icon: <Scale size={18} strokeWidth={1.5} color="#3b82f6" /> },
+        { name: 'Vendors', path: '/vendors', icon: <Users size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Purchase Orders', path: '/orders', icon: <ShoppingCart size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Rate Inquiry', path: '/rate-inquiry', icon: <ClipboardList size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
     {
       label: 'Operations & Finance',
       items: [
-        { name: 'Challans & Dispatch', path: '/challans', icon: <FileText size={18} strokeWidth={1.5} color="#8b5cf6" /> },
-        { name: 'Delivery Receipts', path: '/delivery-receipts', icon: <Truck size={18} strokeWidth={1.5} color="#ec4899" /> },
-        { name: 'Payment Slips', path: '/payments', icon: <CreditCard size={18} strokeWidth={1.5} color="#10b981" /> },
+        { name: 'Challans & Dispatch', path: '/challans', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Delivery & Payments', path: '/site-records', icon: <Package size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
     {
       label: 'Administration',
       items: [
-        { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="#3b82f6" /> },
-        { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="#6b7280" /> },
-        { name: 'User Management', path: '/users', icon: <Shield size={18} strokeWidth={1.5} color="#ef4444" /> },
+        { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'User Management', path: '/users', icon: <Shield size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
   ];
@@ -84,6 +84,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
             <span className={styles.navLabel}>{collapsed ? '•' : group.label}</span>
             {group.items.map((item) => {
               const isActive = pathname === item.path;
+
               return (
                 <Link
                   key={item.name}

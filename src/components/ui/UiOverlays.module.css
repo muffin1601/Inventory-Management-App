@@ -13,8 +13,8 @@
   max-width: 360px;
   padding: 0.75rem 0.9rem;
   border: 1px solid var(--border-color);
-  background: #fff;
-  box-shadow: 0 8px 18px rgba(15, 23, 42, 0.08);
+  background: #ffffff;
+  box-shadow: none;
 }
 
 .success {
@@ -26,7 +26,7 @@
 }
 
 .info {
-  border-left: 3px solid var(--accent-primary);
+  border-left: 3px solid #111111;
 }
 
 .overlay {
@@ -90,12 +90,13 @@
   padding: 0.45rem 0.8rem;
   border: 1px solid var(--border-color);
   background: #fff;
+  transition: none;
 }
 
 .primaryBtn {
-  border-color: var(--accent-primary);
-  background: var(--accent-primary);
-  color: #fff;
+  border-color: #111111;
+  background: #111111;
+  color: #ffffff;
 }
 
 .primaryBtn:disabled {

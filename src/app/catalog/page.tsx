@@ -617,7 +617,7 @@ export default function ProductsPage() {
                         {canDeleteProducts && <button 
                           className={styles.iconBtn} 
                           title="Delete Product"
-                          style={{ color: '#ef4444' }}
+                          style={{ color: 'var(--text-secondary)' }}
                           onClick={(e) => {
                             e.stopPropagation();
                             handleDeleteProduct(product.id);
@@ -655,7 +655,7 @@ export default function ProductsPage() {
                                 {canEditProducts && <button className={styles.miniBtn} title="Edit Option" onClick={() => handleOpenEditVariant(product, v)}>
                                   <Edit2 size={12}/>
                                 </button>}
-                                {canDeleteProducts && <button className={styles.miniBtn} title="Delete Option" style={{ color: '#ef4444' }} onClick={() => handleDeleteVariant(v.id)}>
+                                {canDeleteProducts && <button className={styles.miniBtn} title="Delete Option" style={{ color: 'var(--text-secondary)' }} onClick={() => handleDeleteVariant(v.id)}>
                                   <Trash2 size={12}/>
                                 </button>}
                               </div>
@@ -1034,7 +1034,7 @@ export default function ProductsPage() {
             {currentStep === 1 && (
               <div className={styles.card} style={{ border: 'none', background: 'transparent', padding: 0 }}>
                 <div className={styles.formGroup}>
-                  <label><Package size={18} strokeWidth={1.5} color="#ec4899" /> Product Name</label>
+                  <label><Package size={18} strokeWidth={1.5} color="currentColor" /> Product Name</label>
                   <input 
                     type="text" 
                     value={productName} 
@@ -1044,7 +1044,7 @@ export default function ProductsPage() {
                 </div>
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
-                    <label><Tag size={18} strokeWidth={1.5} color="#a855f7" /> Category</label>
+                    <label><Tag size={18} strokeWidth={1.5} color="currentColor" /> Category</label>
                     <SearchableSelect
                       value={category}
                       options={categoryOptions}
@@ -1057,7 +1057,7 @@ export default function ProductsPage() {
                   </div>
 
                   <div className={styles.formGroup}>
-                    <label><History size={18} strokeWidth={1.5} color="#f97316" /> Brand / Manufacturer</label>
+                    <label><History size={18} strokeWidth={1.5} color="currentColor" /> Brand / Manufacturer</label>
                     <SearchableSelect
                       value={manufacturer}
                       options={manufacturerOptions}
@@ -1071,7 +1071,7 @@ export default function ProductsPage() {
                 </div>
                 <div className={styles.formRow}>
                   <div className={styles.formGroup}>
-                    <label><Layers size={18} strokeWidth={1.5} color="#06b6d4" /> Main Warehouse</label>
+                    <label><Layers size={18} strokeWidth={1.5} color="currentColor" /> Main Warehouse</label>
                     <SearchableSelect
                       value={selectedWarehouse}
                       options={warehouseOptions}
@@ -1088,7 +1088,7 @@ export default function ProductsPage() {
                 </div>
 
                 <div className={styles.formGroup}>
-                  <label><Info size={18} strokeWidth={1.5} color="#10b981" /> Description</label>
+                  <label><Info size={18} strokeWidth={1.5} color="currentColor" /> Description</label>
                   <textarea 
                     rows={4}
                     value={description}

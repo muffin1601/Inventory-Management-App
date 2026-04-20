@@ -114,7 +114,7 @@ export default function Dashboard() {
             <span className={styles.cardValue}>0</span>
             <span className={styles.cardSub}>Not moved in 90 days</span>
           </div>
-          <div className={styles.cardIconBox}><AlertCircle size={16} color="#ef4444" /></div>
+          <div className={styles.cardIconBox}><AlertCircle size={16} color="currentColor" /></div>
         </div>
 
         <div className={styles.card}>
@@ -123,7 +123,7 @@ export default function Dashboard() {
             <span className={styles.cardValue}>₹ 0</span>
             <span className={styles.cardSub}>{pendingPayments.length} invoices due</span>
           </div>
-          <div className={styles.cardIconBox}><CreditCard size={16} color="#f59e0b" /></div>
+          <div className={styles.cardIconBox}><CreditCard size={16} color="currentColor" /></div>
         </div>
 
         <div className={styles.card}>
@@ -132,7 +132,7 @@ export default function Dashboard() {
             <span className={styles.cardValue}>{stats.pendingPos}</span>
             <span className={styles.cardSub}>Purchase orders</span>
           </div>
-          <div className={styles.cardIconBox}><CheckCircle size={16} color="#10b981" /></div>
+          <div className={styles.cardIconBox}><CheckCircle size={16} color="currentColor" /></div>
         </div>
       </div>
 
@@ -144,7 +144,7 @@ export default function Dashboard() {
             <span className={styles.smallCardValue}>{stats.products}</span>
             <span className={styles.smallCardSub}>0 low stock</span>
           </div>
-          <div className={styles.smallIconBox}><Package size={14} color="#ec4899" /></div>
+          <div className={styles.smallIconBox}><Package size={14} color="currentColor" /></div>
         </div>
 
         <div className={styles.smallCard}>
@@ -152,7 +152,7 @@ export default function Dashboard() {
             <span className={styles.smallCardLabel}>PROJECTS</span>
             <span className={styles.smallCardValue}>{stats.projects}</span>
           </div>
-          <div className={styles.smallIconBox}><BarChart2 size={14} color="#06b6d4" /></div>
+          <div className={styles.smallIconBox}><BarChart2 size={14} color="currentColor" /></div>
         </div>
 
         <div className={styles.smallCard}>
@@ -160,7 +160,7 @@ export default function Dashboard() {
             <span className={styles.smallCardLabel}>VENDORS</span>
             <span className={styles.smallCardValue}>{stats.vendors}</span>
           </div>
-          <div className={styles.smallIconBox}><Users size={14} color="#f59e0b" /></div>
+          <div className={styles.smallIconBox}><Users size={14} color="currentColor" /></div>
         </div>
 
         <div className={styles.smallCard}>
@@ -169,7 +169,7 @@ export default function Dashboard() {
             <span className={styles.smallCardValue}>{stats.activePos}</span>
             <span className={styles.smallCardSub}>{stats.pendingPos} pending</span>
           </div>
-          <div className={styles.smallIconBox}><ShoppingCart size={14} color="#ef4444" /></div>
+          <div className={styles.smallIconBox}><ShoppingCart size={14} color="currentColor" /></div>
         </div>
 
         <div className={styles.smallCard}>
@@ -178,7 +178,7 @@ export default function Dashboard() {
             <span className={styles.smallCardValue}>{stats.challans}</span>
             <span className={styles.smallCardSub}>0 pending</span>
           </div>
-          <div className={styles.smallIconBox}><Truck size={14} color="#8b5cf6" /></div>
+          <div className={styles.smallIconBox}><Truck size={14} color="currentColor" /></div>
         </div>
 
         <div className={styles.smallCard}>
@@ -186,7 +186,7 @@ export default function Dashboard() {
             <span className={styles.smallCardLabel}>PAYMENTS</span>
             <span className={styles.smallCardValue}>0</span>
           </div>
-          <div className={styles.smallIconBox}><CreditCard size={14} color="#10b981" /></div>
+          <div className={styles.smallIconBox}><CreditCard size={14} color="currentColor" /></div>
         </div>
       </div>
 
@@ -194,7 +194,7 @@ export default function Dashboard() {
       <div className={styles.rowCharts}>
         <div className={styles.panel}>
           <div className={styles.panelHeader}>
-            <TrendingUp size={16} color="var(--accent-primary)" />
+            <TrendingUp size={16} color="currentColor" />
             <span className={styles.panelTitle}>Monthly Purchase Order Trend</span>
           </div>
           <div className={styles.panelEmpty}>Create purchase orders to see trends</div>
@@ -202,7 +202,7 @@ export default function Dashboard() {
         
         <div className={styles.panel}>
           <div className={styles.panelHeader}>
-            <ShoppingCart size={16} color="#ef4444" />
+            <ShoppingCart size={16} color="currentColor" />
             <span className={styles.panelTitle}>PO Status</span>
           </div>
           <div className={styles.panelEmpty}>No POs yet</div>
@@ -214,7 +214,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <Package size={16} color="#ec4899" />
+              <Package size={16} color="currentColor" />
               <span className={styles.panelTitle}>Stock by Warehouse</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -228,7 +228,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <Users size={16} color="#f59e0b" />
+              <Users size={16} color="currentColor" />
               <span className={styles.panelTitle}>Top Vendors</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -247,7 +247,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <TrendingUp size={16} color="#10b981" />
+              <TrendingUp size={16} color="currentColor" />
               <span className={styles.panelTitle}>Fast-Moving Items (30 days)</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -261,7 +261,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <AlertCircle size={16} color="#ef4444" />
+              <AlertCircle size={16} color="currentColor" />
               <span className={styles.panelTitle}>Dead Stock (0 items not moved in 90d)</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -272,7 +272,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <Clock size={16} color="#6b7280" />
+              <Clock size={16} color="currentColor" />
               <span className={styles.panelTitle}>Delayed Deliveries (0)</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -286,7 +286,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <CreditCard size={16} color="#10b981" />
+              <CreditCard size={16} color="currentColor" />
               <span className={styles.panelTitle}>Pending Payments</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -299,7 +299,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <ShoppingCart size={16} color="#ef4444" />
+              <ShoppingCart size={16} color="currentColor" />
               <span className={styles.panelTitle}>Recent Purchase Orders</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>
@@ -312,7 +312,7 @@ export default function Dashboard() {
         <div className={styles.panel}>
           <div className={styles.panelHeaderBetween}>
             <div className={styles.panelHeader}>
-              <Truck size={16} color="#8b5cf6" />
+              <Truck size={16} color="currentColor" />
               <span className={styles.panelTitle}>Recent Challans</span>
             </div>
             <a href="#" className={styles.viewAll}>View All <ArrowRight size={14} /></a>

@@ -5,7 +5,7 @@
   gap: 1rem;
   padding: 1rem 1.5rem;
   border-top: 1px solid var(--border-color);
-  background: linear-gradient(180deg, #ffffff 0%, #f8fafc 100%);
+  background: #ffffff;
 }
 
 .summary {
@@ -58,7 +58,7 @@
   border: 1px solid var(--border-color);
   font-size: 0.85rem;
   font-weight: 600;
-  transition: background 0.2s ease, color 0.2s ease, border-color 0.2s ease;
+  transition: none;
 }
 
 .pageButton,
@@ -69,15 +69,15 @@
 
 .pageButton:hover,
 .navButton:hover:not(:disabled) {
-  background: #f8fafc;
-  color: var(--accent-primary);
-  border-color: #cbd5e1;
+  background: #f3f4f6;
+  color: #111111;
+  border-color: #d1d5db;
 }
 
 .pageButtonActive {
-  background: var(--accent-primary);
+  background: #111111;
   color: #ffffff;
-  border-color: var(--accent-primary);
+  border-color: #111111;
 }
 
 .navButton:disabled {

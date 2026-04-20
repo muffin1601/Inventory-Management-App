@@ -1360,12 +1360,12 @@ export default function OrdersPage() {
                     <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end' }}>
                       {canApprove && order.status === 'PENDING' && (
                         <button className={styles.actionBtn} title="Approve" onClick={() => approveOrder(order)}>
-                          <Check size={16} color="#10b981" />
+                          <Check size={16} color="currentColor" />
                         </button>
                       )}
                       {canCancel && order.status === 'PENDING' && (
                         <button className={styles.actionBtn} title="Reject" onClick={() => rejectOrder(order)}>
-                          <X size={16} color="#ef4444" />
+                          <X size={16} color="currentColor" />
                         </button>
                       )}
                       <button className={styles.actionBtn} title="View details" onClick={() => setSelectedPO(order)}>
@@ -1378,7 +1378,7 @@ export default function OrdersPage() {
                         <Settings size={16} />
                       </button>
                       <button className={styles.actionBtn} title="Delete" onClick={() => deletePurchaseOrder(order)}>
-                        <Trash2 size={16} color="#ef4444" />
+                        <Trash2 size={16} color="currentColor" />
                       </button>
                     </div>
                   </td>

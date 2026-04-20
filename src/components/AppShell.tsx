@@ -1,6 +1,6 @@
 "use client";
 
-import React from 'react';
+import React, { Suspense } from 'react';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import Footer from './Footer';
@@ -28,7 +28,9 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
 
   return (
     <div className={`${styles.layout} ${collapsed ? styles.layoutCollapsed : ''}`}>
-      <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
+      <Suspense fallback={<div style={{ width: collapsed ? '70px' : '260px' }} />}>
+        <Sidebar collapsed={collapsed} onToggle={toggleSidebar} />
+      </Suspense>
       <main className={`${styles.main} ${collapsed ? styles.mainCollapsed : ''}`}>
         <Header />
         <div className={styles.pageContent}>{children}</div>

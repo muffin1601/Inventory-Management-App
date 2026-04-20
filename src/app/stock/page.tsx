@@ -651,14 +651,14 @@ export default function StockPage() {
                   className={`${styles.secondaryBtn} ${adjustmentType === 'IN' ? styles.active : ''}`}
                   onClick={() => setAdjustmentType('IN')}
                 >
-                  <ArrowUpRight size={14} color="#10b981" /> Stock IN
+                  <ArrowUpRight size={14} color="currentColor" /> Stock IN
                 </button>
                 <button
                   type="button"
                   className={`${styles.secondaryBtn} ${adjustmentType === 'OUT' ? styles.active : ''}`}
                   onClick={() => setAdjustmentType('OUT')}
                 >
-                  <ArrowDownLeft size={14} color="#ef4444" /> Stock OUT
+                  <ArrowDownLeft size={14} color="currentColor" /> Stock OUT
                 </button>
               </div>
             </div>
