@@ -2,7 +2,8 @@
 
 import styles from './Layout.module.css';
 import Link from 'next/link';
-import { usePathname, useSearchParams } from 'next/navigation';
+import Image from 'next/image';
+import { usePathname } from 'next/navigation';
 import {
   Home,
   Box,
@@ -10,24 +11,23 @@ import {
   Building2,
   Users,
   ClipboardList,
-  Scale,
   ShoppingCart,
   FileText,
   Package,
-  Truck,
-  CreditCard,
   UploadCloud,
   History,
   Shield,
   ArrowRightLeft,
+  CreditCard,
+  Truck,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
 import React from 'react';
+import { modulesService } from '@/lib/services/modules';
 
 export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = usePathname();
-  const searchParams = useSearchParams();
 
   const navGroups = [
     {
@@ -54,14 +54,15 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
       ],
     },
     {
-      label: 'Operations & Finance',
+      label: 'Operations',
       items: [
-        { name: 'Challans & Dispatch', path: '/challans', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Delivery & Payments', path: '/site-records', icon: <Package size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Site Records', path: '/site-records', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Payments', path: '/payments', icon: <CreditCard size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Challans', path: '/challans', icon: <Truck size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
     {
-      label: 'Administration',
+      label: 'Reports & Admin',
       items: [
         { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="currentColor" /> },
         { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="currentColor" /> },
@@ -70,45 +71,80 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
     },
   ];
 
+  const [visibleNavGroups, setVisibleNavGroups] = React.useState(navGroups);
+  const [currentUserLabel, setCurrentUserLabel] = React.useState<{
+    name: string;
+    role: string;
+    email: string;
+    initial: string;
+  } | null>(null);
+
+  React.useEffect(() => {
+    const syncCurrentUser = async () => {
+      const current = modulesService.getAuthenticatedUser() || await modulesService.getCurrentUser();
+      if (current) {
+        setCurrentUserLabel({
+          name: current.full_name,
+          role: current.role_name,
+          email: current.email,
+          initial: current.full_name.charAt(0).toUpperCase(),
+        });
+      }
+    };
+
+    window.addEventListener('ims-current-user-changed', syncCurrentUser);
+    window.addEventListener('ims-users-changed', syncCurrentUser);
+    return () => {
+      window.removeEventListener('ims-current-user-changed', syncCurrentUser);
+      window.removeEventListener('ims-users-changed', syncCurrentUser);
+    };
+  }, []);
+
   return (
     <aside className={`${styles.sidebar} ${collapsed ? styles.sidebarCollapsed : ''}`}>
       <div className={styles.header}>
         <div className={styles.logo}>
-          <img src="/logo1.png" alt="Watcon International" className={styles.logoImage} />
+          <Image src="/logo1.png" alt="Watcon International" className={styles.logoImage} width={180} height={34} priority />
         </div>
       </div>
 
       <nav className={styles.nav}>
-        {navGroups.map((group) => (
-          <div key={group.label} className={styles.navGroup}>
-            <span className={styles.navLabel}>{collapsed ? '•' : group.label}</span>
-            {group.items.map((item) => {
-              const isActive = pathname === item.path;
+        {visibleNavGroups.map((group) => {
 
-              return (
-                <Link
-                  key={item.name}
-                  href={item.path}
-                  className={`${styles.navItem} ${isActive ? styles.active : ''} ${collapsed ? styles.navItemCollapsed : ''}`}
-                  title={item.name}
-                >
-                  {item.icon}
-                  <span className={collapsed ? styles.navTextHidden : ''}>{item.name}</span>
-                </Link>
-              );
-            })}
-          </div>
-        ))}
+          return (
+            <div key={group.label} className={styles.navGroup}>
+              <span className={styles.navLabel}>{collapsed ? '•' : group.label}</span>
+              {group.items.map((item) => {
+                const isActive = pathname === item.path;
+
+                return (
+                  <Link
+                    key={item.name}
+                    href={item.path}
+                    className={`${styles.navItem} ${isActive ? styles.active : ''} ${collapsed ? styles.navItemCollapsed : ''}`}
+                    title={item.name}
+                  >
+                    {item.icon}
+                    <span className={collapsed ? styles.navTextHidden : ''}>{item.name}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          );
+        })}
       </nav>
 
       <div className={styles.footer}>
-        <div className={`${styles.userCard} ${collapsed ? styles.userCardCollapsed : ''}`}>
-          <div className={styles.avatar}>A</div>
-          <div className={`${styles.userInfo} ${collapsed ? styles.userInfoHidden : ''}`}>
-            <span className={styles.userName}>Admin</span>
-            <span className={styles.userRole}>Admin</span>
+        {currentUserLabel && (
+          <div className={`${styles.userCard} ${collapsed ? styles.userCardCollapsed : ''}`}>
+            <div className={styles.avatar}>{currentUserLabel.initial}</div>
+            <div className={`${styles.userInfo} ${collapsed ? styles.userInfoHidden : ''}`}>
+              <span className={styles.userName}>{currentUserLabel.name}</span>
+              <span className={styles.userRole}>{currentUserLabel.role}</span>
+              <span className={styles.userRole}>{currentUserLabel.email}</span>
+            </div>
           </div>
-        </div>
+        )}
 
         <button
           type="button"

@@ -46,6 +46,13 @@ function makeId(prefix: string) {
 
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastItem[]>([]);
+  const [confirmState, setConfirmState] = useState<ConfirmState>({
+    open: false,
+    title: '',
+    message: '',
+    confirmText: 'Confirm',
+    cancelText: 'Cancel',
+  });
 
   const showToast = useCallback((message: string, type: ToastType = 'info') => {
     const id = makeId('toast');
@@ -65,14 +72,42 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
     reasonPlaceholder?: string;
     initialReason?: string;
   }) => {
-    const defaultReason = options.requireReason
-      ? options.initialReason?.trim() || `${options.confirmText || 'Confirmed'} via toast`
-      : '';
+    return new Promise<{ confirmed: boolean; reason: string }>((resolve) => {
+      setConfirmState({
+        open: true,
+        title: options.title,
+        message: options.message,
+        confirmText: options.confirmText || 'Confirm',
+        cancelText: options.cancelText || 'Cancel',
+        requireReason: options.requireReason,
+        reasonLabel: options.reasonLabel,
+        reasonPlaceholder: options.reasonPlaceholder,
+        reasonValue: options.initialReason || '',
+        resolve: (value) => {
+          setConfirmState(prev => ({ ...prev, open: false }));
+          resolve(value);
+        },
+      });
+    });
+  }, []);
 
-    showToast(`${options.title} confirmed.`, 'info');
+  const handleConfirm = useCallback(() => {
+    if (confirmState.resolve) {
+      confirmState.resolve({
+        confirmed: true,
+        reason: confirmState.reasonValue || '',
+      });
+    }
+  }, [confirmState]);
 
-    return Promise.resolve({ confirmed: true, reason: defaultReason });
-  }, [showToast]);
+  const handleCancel = useCallback(() => {
+    if (confirmState.resolve) {
+      confirmState.resolve({
+        confirmed: false,
+        reason: '',
+      });
+    }
+  }, [confirmState]);
 
   const value = useMemo(() => ({ showToast, confirmAction }), [showToast, confirmAction]);
 
@@ -88,6 +123,45 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
         ))}
       </div>
 
+      {confirmState.open && (
+        <div className={styles.overlay}>
+          <div className={styles.dialog}>
+            <h3>{confirmState.title}</h3>
+            <p>{confirmState.message}</p>
+            
+            {confirmState.requireReason && (
+              <div className={styles.reasonBlock}>
+                <label className={styles.reasonLabel}>
+                  {confirmState.reasonLabel || 'Reason'}
+                </label>
+                <textarea
+                  className={styles.reasonInput}
+                  placeholder={confirmState.reasonPlaceholder || 'Please provide a reason...'}
+                  value={confirmState.reasonValue}
+                  onChange={(e) => setConfirmState(prev => ({ ...prev, reasonValue: e.target.value }))}
+                />
+              </div>
+            )}
+            
+            <div className={styles.dialogActions}>
+              <button
+                type="button"
+                className={styles.secondaryBtn}
+                onClick={handleCancel}
+              >
+                {confirmState.cancelText}
+              </button>
+              <button
+                type="button"
+                className={styles.primaryBtn}
+                onClick={handleConfirm}
+              >
+                {confirmState.confirmText}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </UiContext.Provider>
   );
 }

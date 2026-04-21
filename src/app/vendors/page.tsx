@@ -298,13 +298,14 @@ export default function VendorsPage() {
     try {
       const { error } = await supabase.from('vendors').update({ status: nextStatus }).eq('id', vendor.id);
       if (error) throw error;
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Vendor Status Changed',
         entity_type: 'vendor',
         entity_id: vendor.id,
         entity_name: vendor.name,
         reason: confirmation.reason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `Changed to ${nextStatus}`,
       });
       await loadVendors();
@@ -332,13 +333,14 @@ export default function VendorsPage() {
       const savedDetails = readVendorDetails();
       delete savedDetails[vendor.id];
       writeVendorDetails(savedDetails);
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Vendor Deleted',
         entity_type: 'vendor',
         entity_id: vendor.id,
         entity_name: vendor.name,
         reason: confirmation.reason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: 'Removed from vendor list',
       });
       await loadVendors();

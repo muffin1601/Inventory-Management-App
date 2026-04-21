@@ -3,34 +3,14 @@
 import React, { useState, useEffect } from 'react';
 import styles from './Challans.module.css';
 import { 
-  Plus, Search, Filter, Truck, CheckCircle2, Clock, 
-  MapPin, User, Package, Download, Eye, Trash2, 
-  ArrowRight, FileText, Printer, MoreVertical
+  Search, Filter, Truck, CheckCircle2, Clock,
+  Eye, Trash2, FileText, Printer
 } from 'lucide-react';
 import { useUi } from '@/components/ui/AppProviders';
 import TablePagination from '@/components/ui/TablePagination';
-import { projectsService, type ProjectRecord, type BoqItemRecord } from '@/lib/services/projects';
-import { inventoryService } from '@/lib/services/inventory';
-
-interface ChallanItem {
-  id: string;
-  name: string;
-  quantity: number;
-  unit: string;
-  boqQty?: number;
-  stockQty?: number;
-}
-
-interface Challan {
-  id: string;
-  challan_no: string;
-  po_no: string;
-  project_name: string;
-  vendor_name: string;
-  dispatch_date: string;
-  status: 'ISSUED' | 'DISPATCHED' | 'DELIVERED';
-  items: ChallanItem[];
-}
+import { projectsService, type ProjectRecord } from '@/lib/services/projects';
+import { modulesService } from '@/lib/services/modules';
+import type { ChallanRow as Challan } from '@/types/modules';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
@@ -43,12 +23,10 @@ export default function ChallansPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [viewingChallan, setViewingChallan] = useState<Challan | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
-  const [inventory, setInventory] = useState<any[]>([]);
-  const [boqItems, setBoqItems] = useState<BoqItemRecord[]>([]);
   const [dispatchItems, setDispatchItems] = useState<any[]>([]);
   const [loadingBoq, setLoadingBoq] = useState(false);
   const [newChallan, setNewChallan] = useState<Partial<Challan>>({
-    status: 'IN_TRANSIT',
+    status: 'ISSUED',
     items: []
   });
   const { showToast } = useUi();
@@ -56,18 +34,14 @@ export default function ChallansPage() {
   // Load projects and inventory
   useEffect(() => {
     const loadData = async () => {
-      const [projRes, prods] = await Promise.all([
-        projectsService.listProjects(),
-        inventoryService.getProducts()
-      ]);
+      const projRes = await projectsService.listProjects();
       setProjects(projRes.projects);
-      setInventory(prods);
     };
     loadData();
 
-    const saved = localStorage.getItem('inventory_challans');
-    if (saved) {
-      setChallans(JSON.parse(saved));
+    const saved = modulesService.getChallans();
+    if (saved.length > 0) {
+      setChallans(saved);
     } else {
       // Mock data for first load
       const mock: Challan[] = [
@@ -77,7 +51,6 @@ export default function ChallansPage() {
           po_no: 'PO-WAT-881',
           project_name: 'DLF Cyber Park',
           vendor_name: 'Delta Valve House',
-          dispatch_date: '2024-03-15',
           dispatch_date: '2024-03-15',
           status: 'DELIVERED',
           items: [
@@ -99,13 +72,13 @@ export default function ChallansPage() {
         }
       ];
       setChallans(mock);
-      localStorage.setItem('inventory_challans', JSON.stringify(mock));
+      modulesService.saveChallans(mock);
     }
   }, []);
 
   const saveChallans = (updated: Challan[]) => {
     setChallans(updated);
-    localStorage.setItem('inventory_challans', JSON.stringify(updated));
+    modulesService.saveChallans(updated);
   };
 
   const handleProjectSelect = async (projectName: string) => {
@@ -117,7 +90,6 @@ export default function ChallansPage() {
     try {
       const boqRes = await projectsService.listBoqItems(project.id);
       const items = boqRes.items;
-      setBoqItems(items);
       
       // Calculate already delivered for each item from existing challans
       const processedItems = items.map(boq => {
@@ -126,9 +98,6 @@ export default function ChallansPage() {
           .reduce((acc, c) => acc + (c.items.find(i => i.name === boq.item_name)?.quantity || 0), 0);
         
         // Robust matching including trim
-        const trimmedBoqName = boq.item_name.trim().toLowerCase();
-        const stockItem = inventory.find(p => p.name.trim().toLowerCase() === trimmedBoqName);
-        
         return {
           ...boq,
           name: boq.item_name,
@@ -157,7 +126,7 @@ export default function ChallansPage() {
     setDispatchItems(updated);
   };
 
-  const createChallan = () => {
+  const createChallan = async () => {
     const itemsToDispatch = dispatchItems
       .filter(i => i.dispatchQty > 0)
       .map(i => ({
@@ -190,17 +159,48 @@ export default function ChallansPage() {
 
     saveChallans([challan, ...challans]);
     setCreateOpen(false);
+    try {
+      const currentUser = await modulesService.getCurrentUser();
+      await modulesService.addAudit({
+        action: 'Challan Created',
+        entity_type: 'challan',
+        entity_id: challan.id,
+        entity_name: challan.challan_no,
+        reason: `Dispatch created for ${challan.project_name}`,
+        performed_by: currentUser?.email || 'Unknown',
+        details: `${challan.items.length} items | Vendor: ${challan.vendor_name}`,
+      });
+    } catch (error) {
+      console.error('Failed to add challan audit:', error);
+    }
     showToast('Delivery Challan Created!', 'success');
   };
 
-  const deleteChallan = (id: string) => {
+  const deleteChallan = async (id: string) => {
     if (confirm('Are you sure you want to delete this challan?')) {
+      const existing = challans.find(c => c.id === id);
       saveChallans(challans.filter(c => c.id !== id));
+      if (existing) {
+        try {
+          const currentUser = await modulesService.getCurrentUser();
+          await modulesService.addAudit({
+            action: 'Challan Deleted',
+            entity_type: 'challan',
+            entity_id: existing.id,
+            entity_name: existing.challan_no,
+            reason: `Dispatch deleted for ${existing.project_name}`,
+            performed_by: currentUser?.email || 'Unknown',
+            details: `Vendor: ${existing.vendor_name}`,
+          });
+        } catch (error) {
+          console.error('Failed to add challan deletion audit:', error);
+        }
+      }
       showToast('Challan deleted', 'info');
     }
   };
 
-  const updateStatus = (id: string, status: Challan['status']) => {
+  const updateStatus = async (id: string, status: Challan['status']) => {
     if (status === 'DISPATCHED') {
       if (!confirm('Generate Gate Pass? Stock will be deducted and dispatch initiated.')) {
         return;
@@ -210,6 +210,23 @@ export default function ChallansPage() {
     
     const updated = challans.map(c => c.id === id ? { ...c, status } : c);
     saveChallans(updated);
+    const updatedChallan = updated.find(c => c.id === id);
+    if (updatedChallan) {
+      try {
+        const currentUser = await modulesService.getCurrentUser();
+        await modulesService.addAudit({
+          action: 'Challan Status Updated',
+          entity_type: 'challan',
+          entity_id: updatedChallan.id,
+          entity_name: updatedChallan.challan_no,
+          reason: `Status changed to ${status}`,
+          performed_by: currentUser?.email || 'Unknown',
+          details: `${updatedChallan.project_name} | ${updatedChallan.vendor_name}`,
+        });
+      } catch (error) {
+        console.error('Failed to add challan status audit:', error);
+      }
+    }
     if (viewingChallan?.id === id) {
       setViewingChallan({ ...viewingChallan, status });
     }
@@ -245,7 +262,7 @@ export default function ChallansPage() {
         <div className={styles.statCard}>
           <div className={styles.statLabel}>Active Shipments</div>
           <div className={styles.statValue} style={{ color: 'var(--accent-amber)' }}>
-            {challans.filter(c => c.status === 'IN_TRANSIT').length}
+            {challans.filter(c => c.status === 'DISPATCHED').length}
           </div>
         </div>
         <div className={styles.statCard}>
@@ -257,7 +274,7 @@ export default function ChallansPage() {
         <div className={styles.statCard}>
           <div className={styles.statLabel}>Pending Dispatches</div>
           <div className={styles.statValue} style={{ color: 'var(--text-muted)' }}>
-            {challans.filter(c => c.status === 'PENDING').length}
+            {challans.filter(c => c.status === 'ISSUED').length}
           </div>
         </div>
       </div>

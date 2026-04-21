@@ -179,11 +179,13 @@ export default function OrdersPage() {
       setVendors(mergedVendors);
       setProjects(projectList.projects || []);
 
-      const current = modulesService.getCurrentUser();
-      setCanCreate(modulesService.hasPermission(current, 'orders.create'));
-      setCanApprove(modulesService.hasPermission(current, 'orders.approve'));
-      setCanCancel(modulesService.hasPermission(current, 'orders.cancel'));
-      setIsAdmin(modulesService.hasPermission(current, 'admin.manage') || current.role_id === 'admin');
+      const current = await modulesService.getCurrentUser();
+      if (current) {
+        setCanCreate(modulesService.hasPermission(current, 'orders.create'));
+        setCanApprove(modulesService.hasPermission(current, 'orders.approve'));
+        setCanCancel(modulesService.hasPermission(current, 'orders.cancel'));
+        setIsAdmin(modulesService.hasPermission(current, 'roles.manage') || current.role_name === 'Super Admin');
+      }
     }
 
     load();
@@ -451,13 +453,14 @@ export default function OrdersPage() {
     }
 
     try {
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Order Approved',
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
         reason: confirmation.reason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `${order.type} for ${order.vendor_name || order.entity_name}`,
       });
     } catch (error) {
@@ -497,13 +500,14 @@ export default function OrdersPage() {
     if (!confirmation.confirmed) return;
 
     try {
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Order Status Changed',
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
         reason: confirmation.reason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `Status changed to ${statusLabels[newStatus]}`,
       });
     } catch (error) {
@@ -534,13 +538,14 @@ export default function OrdersPage() {
     if (!confirmation.confirmed) return;
 
     try {
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Order Rejected',
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
         reason: confirmation.reason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `${order.type} for ${order.vendor_name || order.entity_name}`,
       });
     } catch (error) {
@@ -571,13 +576,14 @@ export default function OrdersPage() {
 
     try {
       // Add audit log for deletion
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Order Deleted',
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
         reason: confirmation.reason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `${order.type} for ${order.vendor_name || order.entity_name}`,
       });
 

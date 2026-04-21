@@ -163,10 +163,10 @@ export default function StockPage() {
       setUnits(unitRows);
       setReasons(reasonRows);
 
-      const current = modulesService.getCurrentUser();
-      setCanAdjust(modulesService.hasPermission(current, 'inventory.adjust'));
-      setCanEditProducts(modulesService.hasPermission(current, 'products.edit'));
-      setCanDeleteProducts(modulesService.hasPermission(current, 'products.delete'));
+      const current = await modulesService.getCurrentUser();
+      setCanAdjust(current ? modulesService.hasPermission(current, 'inventory.adjust') : false);
+      setCanEditProducts(current ? modulesService.hasPermission(current, 'products.edit') : false);
+      setCanDeleteProducts(current ? modulesService.hasPermission(current, 'products.delete') : false);
     } catch (err) {
       console.error('Failed to fetch stock data:', err);
       showToast('Could not load stock data right now.', 'error');
@@ -379,8 +379,8 @@ export default function StockPage() {
       const warehouse = warehouses.find((item) => item.id === selectedWarehouse);
       if (!variant || !warehouse) return;
 
-      const actor = modulesService.getCurrentUser();
-      const actorLabel = `${actor.full_name} (${actor.email})`;
+      const actor = await modulesService.getCurrentUser();
+      const actorLabel = actor ? `${actor.full_name} (${actor.email})` : 'Unknown User';
       const auditNote = buildAuditNote(
         `Stock ${adjustmentType}`,
         adjustmentReason,
@@ -422,8 +422,8 @@ export default function StockPage() {
     }
 
     try {
-      const actor = modulesService.getCurrentUser();
-      const actorLabel = `${actor.full_name} (${actor.email})`;
+      const actor = await modulesService.getCurrentUser();
+      const actorLabel = actor ? `${actor.full_name} (${actor.email})` : 'Unknown User';
       const auditNote = buildAuditNote('Stock Row Edit', editReason, actorLabel);
       const sanitizedAttributes = sanitizeAttributes({
         ...editingRow.attributes,
@@ -475,8 +475,8 @@ export default function StockPage() {
     }
 
     try {
-      const actor = modulesService.getCurrentUser();
-      const actorLabel = `${actor.full_name} (${actor.email})`;
+      const actor = await modulesService.getCurrentUser();
+      const actorLabel = actor ? `${actor.full_name} (${actor.email})` : 'Unknown User';
       const auditNote = buildAuditNote('Variant Delete', deleteReason, actorLabel);
 
       await inventoryService.recordMovement({

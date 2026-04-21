@@ -4,6 +4,11 @@
   background-color: var(--bg-primary);
 }
 
+.authLayout {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
+}
+
 .layoutCollapsed .sidebar {
   width: 76px;
 }
@@ -69,6 +74,43 @@
 .pageContent {
   padding: 1.15rem;
   flex: 1;
+}
+
+.loadingState {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  min-height: 200px;
+}
+
+.loadingState div {
+  color: var(--text-secondary);
+  font-size: 1rem;
+}
+
+.accessDenied {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 1.5rem;
+  background: var(--bg-elevated);
+  border: 1px solid var(--border-color);
+  max-width: 720px;
+}
+
+.accessDenied h2 {
+  font-size: 1.2rem;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.accessDenied p {
+  color: var(--text-secondary);
+  font-size: 0.9rem;
 }
 
 /* Sidebar Specifics */
@@ -249,6 +291,18 @@
   color: var(--text-primary);
   padding: 0.32rem 0.5rem;
   min-width: 190px;
+}
+
+.currentUserBadge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid var(--border-color);
+  background: #fff;
+  color: var(--text-primary);
+  padding: 0.42rem 0.65rem;
+  font-size: 0.78rem;
+  font-weight: 600;
 }
 
 .headerTitle {

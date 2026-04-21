@@ -78,18 +78,28 @@ export default function ProductsPage() {
   const [canDeleteProducts, setCanDeleteProducts] = useState(false);
 
   useEffect(() => {
-    fetchProducts();
-    fetchLookups();
-    const current = modulesService.getCurrentUser();
-    setCanCreateProducts(modulesService.hasPermission(current, 'products.create'));
-    setCanEditProducts(modulesService.hasPermission(current, 'products.edit'));
-    setCanDeleteProducts(modulesService.hasPermission(current, 'products.delete'));
-    const onUserChange = () => {
-      const refreshed = modulesService.getCurrentUser();
-      setCanCreateProducts(modulesService.hasPermission(refreshed, 'products.create'));
-      setCanEditProducts(modulesService.hasPermission(refreshed, 'products.edit'));
-      setCanDeleteProducts(modulesService.hasPermission(refreshed, 'products.delete'));
+    const initPermissions = async () => {
+      fetchProducts();
+      fetchLookups();
+      const current = await modulesService.getCurrentUser();
+      if (current) {
+        setCanCreateProducts(modulesService.hasPermission(current, 'products.create'));
+        setCanEditProducts(modulesService.hasPermission(current, 'products.edit'));
+        setCanDeleteProducts(modulesService.hasPermission(current, 'products.delete'));
+      }
     };
+
+    initPermissions();
+
+    const onUserChange = async () => {
+      const refreshed = await modulesService.getCurrentUser();
+      if (refreshed) {
+        setCanCreateProducts(modulesService.hasPermission(refreshed, 'products.create'));
+        setCanEditProducts(modulesService.hasPermission(refreshed, 'products.edit'));
+        setCanDeleteProducts(modulesService.hasPermission(refreshed, 'products.delete'));
+      }
+    };
+
     window.addEventListener('ims-current-user-changed', onUserChange);
     return () => window.removeEventListener('ims-current-user-changed', onUserChange);
   }, []);

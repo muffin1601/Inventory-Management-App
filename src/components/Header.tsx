@@ -1,8 +1,8 @@
 "use client";
 
 import styles from './Layout.module.css';
-import { Bell } from 'lucide-react';
-import { usePathname } from 'next/navigation';
+import { Bell, LogOut, ShieldCheck } from 'lucide-react';
+import { usePathname, useRouter } from 'next/navigation';
 import { modulesService } from '@/lib/services/modules';
 import type { UserAccessRow } from '@/types/modules';
 import React from 'react';
@@ -26,8 +26,8 @@ const TITLE_MAP: Record<string, string> = {
 
 export default function Header() {
   const pathname = usePathname();
-  const [users, setUsers] = React.useState<UserAccessRow[]>([]);
-  const [currentUserId, setCurrentUserId] = React.useState('');
+  const router = useRouter();
+  const [currentUser, setCurrentUser] = React.useState<UserAccessRow | null>(null);
   
   // Create a formatted title from pathname
   const normalizedPath = pathname.startsWith('/projects') ? '/projects' : pathname;
@@ -38,17 +38,24 @@ export default function Header() {
       : pathname.split('/')[1].charAt(0).toUpperCase() + pathname.split('/')[1].slice(1));
 
   React.useEffect(() => {
-    const allUsers = modulesService.getUsers().filter((user) => user.status === 'ACTIVE');
-    const current = modulesService.getCurrentUser();
-    setUsers(allUsers);
-    setCurrentUserId(current.id);
-    const onUserChange = () => {
-      const refreshed = modulesService.getCurrentUser();
-      setCurrentUserId(refreshed.id);
+    const syncUser = () => {
+      setCurrentUser(modulesService.getAuthenticatedUser());
     };
-    window.addEventListener('ims-current-user-changed', onUserChange);
-    return () => window.removeEventListener('ims-current-user-changed', onUserChange);
+
+    syncUser();
+    window.addEventListener('ims-current-user-changed', syncUser);
+    window.addEventListener('ims-users-changed', syncUser);
+    window.addEventListener('ims-auth-changed', syncUser);
+    return () => {
+      window.removeEventListener('ims-current-user-changed', syncUser);
+      window.removeEventListener('ims-users-changed', syncUser);
+      window.removeEventListener('ims-auth-changed', syncUser);
+    };
   }, []);
+
+  const userLabel = currentUser
+    ? `${currentUser.full_name} • ${currentUser.role_name}`
+    : 'Not signed in';
 
   return (
     <header className={styles.mainHeader}>
@@ -59,23 +66,22 @@ export default function Header() {
       </div>
       
       <div className={styles.headerActions}>
-        <select
-          className={styles.userSelect}
-          value={currentUserId}
-          onChange={(event) => {
-            modulesService.setCurrentUser(event.target.value);
-            setCurrentUserId(event.target.value);
-          }}
-          title="Switch role (demo)"
-        >
-          {users.map((user) => (
-            <option key={user.id} value={user.id}>
-              {user.full_name} ({user.role_name})
-            </option>
-          ))}
-        </select>
+        <div className={styles.currentUserBadge}>
+          <ShieldCheck size={15} />
+          <span>{userLabel}</span>
+        </div>
         <button className={styles.iconButton}>
           <Bell size={18} />
+        </button>
+        <button
+          className={styles.iconButton}
+          title="Logout"
+          onClick={() => {
+            modulesService.logout();
+            router.replace('/login');
+          }}
+        >
+          <LogOut size={18} />
         </button>
       </div>
     </header>

@@ -3,61 +3,33 @@
 import React, { useState, useEffect } from 'react';
 import styles from './SiteRecords.module.css';
 import { 
-  Plus, Search, Filter, CheckCircle2, FileText, 
-  Download, Eye, Trash2, Printer, MapPin, 
-  Calendar, User, Package, ArrowRight, Truck,
-  Building2, Hash, ShoppingCart, CreditCard, ChevronRight, RotateCcw
+  Plus, Search, CheckCircle2,
+  Download, Eye, Trash2, Printer,
+  RotateCcw
 } from 'lucide-react';
 import { useUi } from '@/components/ui/AppProviders';
 import { projectsService, type ProjectRecord } from '@/lib/services/projects';
 import { modulesService } from '@/lib/services/modules';
 import { inventoryService } from '@/lib/services/inventory';
-import type { OrderRow } from '@/types/modules';
+import type { DeliveryReceiptRow, OrderRow, PaymentSlipRow } from '@/types/modules';
 
 type Tab = 'RECEIPTS' | 'PAYMENTS';
 
-interface ReceiptItem {
-  id: string;
-  name: string;
-  quantity: number;
-  unit: string;
-  condition: 'GOOD' | 'DAMAGED'| 'SHORTAGE';
+function makeClientId(prefix: string) {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}_${crypto.randomUUID()}`;
+  }
+  return `${prefix}_${Math.random().toString(36).slice(2, 11)}`;
 }
 
-interface DeliveryReceipt {
-  id: string;
-  receipt_no: string;
-  type: 'SITE_DELIVERY' | 'STORE_DELIVERY';
-  date: string;
-  project_name: string;
-  linked_po: string;
-  receiver_name: string;
-  contact: string;
-  vendor_name: string;
-  status: 'VERIFIED' | 'PENDING' | 'DAMAGED';
-  items: ReceiptItem[];
-  remarks?: string;
-}
-
-interface PaymentSlip {
-  id: string;
-  slip_no: string;
-  date: string;
-  due_date: string;
-  vendor_name: string;
-  po_ref: string;
-  amount: number;
-  payment_method: 'BANK_TRANSFER' | 'CASH' | 'CHEQUE' | 'UPI';
-  ref_no: string;
-  prepared_by: string;
-  status: 'ISSUED' | 'DUE' | 'PAID';
-  remarks?: string;
+function makeDocumentNumber(prefix: string) {
+  return `${prefix}-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`;
 }
 
 export default function SiteRecordsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('RECEIPTS');
-  const [receipts, setReceipts] = useState<DeliveryReceipt[]>([]);
-  const [slips, setSlips] = useState<PaymentSlip[]>([]);
+  const [receipts, setReceipts] = useState<DeliveryReceiptRow[]>(() => modulesService.getDeliveryReceipts());
+  const [slips, setSlips] = useState<PaymentSlipRow[]>(() => modulesService.getPaymentSlips());
   const [search, setSearch] = useState('');
   
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -66,14 +38,13 @@ export default function SiteRecordsPage() {
   
   const [createReceiptOpen, setCreateReceiptOpen] = useState(false);
   const [createPaymentOpen, setCreatePaymentOpen] = useState(false);
-  const [viewingReceipt, setViewingReceipt] = useState<DeliveryReceipt | null>(null);
-  const [viewingSlip, setViewingSlip] = useState<PaymentSlip | null>(null);
+  const [viewingReceipt, setViewingReceipt] = useState<DeliveryReceiptRow | null>(null);
+  const [viewingSlip, setViewingSlip] = useState<PaymentSlipRow | null>(null);
   
-  const [loading, setLoading] = useState(false);
   const { showToast } = useUi();
 
   // Modal States
-  const [newReceipt, setNewReceipt] = useState<Partial<DeliveryReceipt>>({
+  const [newReceipt, setNewReceipt] = useState<Partial<DeliveryReceiptRow>>({
     type: 'SITE_DELIVERY', status: 'VERIFIED', items: []
   });
 
@@ -90,47 +61,76 @@ export default function SiteRecordsPage() {
     };
     loadData();
 
-    setReceipts(JSON.parse(localStorage.getItem('inventory_delivery_receipts') || '[]'));
-    setSlips(JSON.parse(localStorage.getItem('inventory_payment_slips') || '[]'));
   }, []);
 
-  const saveReceipts = (data: DeliveryReceipt[]) => {
+  const saveReceipts = (data: DeliveryReceiptRow[]) => {
     setReceipts(data);
-    localStorage.setItem('inventory_delivery_receipts', JSON.stringify(data));
+    modulesService.saveDeliveryReceipts(data);
   };
 
-  const saveSlips = (data: PaymentSlip[]) => {
+  const saveSlips = (data: PaymentSlipRow[]) => {
     setSlips(data);
-    localStorage.setItem('inventory_payment_slips', JSON.stringify(data));
+    modulesService.savePaymentSlips(data);
   };
 
-  const handleCreateReceipt = () => {
+  const handleCreateReceipt = async () => {
     if (!newReceipt.project_name || (newReceipt.items?.length || 0) === 0) {
       showToast('Fill required fields', 'error');
       return;
     }
-    const receipt: DeliveryReceipt = {
-      ...(newReceipt as DeliveryReceipt),
-      id: Math.random().toString(36).substr(2, 9),
-      receipt_no: `DR-${new Date().getFullYear()}-${Math.floor(100+Math.random()*900)}`,
+    const receipt: DeliveryReceiptRow = {
+      ...(newReceipt as DeliveryReceiptRow),
+      id: makeClientId('receipt'),
+      receipt_no: makeDocumentNumber('DR'),
       date: new Date().toISOString().split('T')[0]
     };
     saveReceipts([receipt, ...receipts]);
     setCreateReceiptOpen(false);
     setNewReceipt({ type: 'SITE_DELIVERY', status: 'VERIFIED', items: [] });
+    try {
+      const currentUser = await modulesService.getCurrentUser();
+      await modulesService.addAudit({
+        action: 'Delivery Receipt Created',
+        entity_type: 'receipt',
+        entity_id: receipt.id,
+        entity_name: receipt.receipt_no,
+        reason: `Receipt recorded for ${receipt.project_name}`,
+        performed_by: currentUser?.email || 'Unknown',
+        details: `${receipt.type} | ${receipt.items.length} items | ${receipt.vendor_name}`,
+      });
+    } catch (error) {
+      console.error('Failed to add receipt audit:', error);
+    }
     showToast('Receipt Created', 'success');
   };
 
-  const getSlipStatus = (slip: PaymentSlip) => {
+  const getSlipStatus = (slip: PaymentSlipRow) => {
     if (slip.status === 'PAID') return 'PAID';
     const today = new Date().toISOString().split('T')[0];
     if (slip.due_date < today) return 'DUE';
     return slip.status;
   };
 
-  const updateSlipStatus = (id: string, status: 'ISSUED' | 'DUE' | 'PAID') => {
+  const updateSlipStatus = async (id: string, status: 'ISSUED' | 'DUE' | 'PAID') => {
     const next = slips.map(s => s.id === id ? { ...s, status } : s);
     saveSlips(next);
+    const updatedSlip = next.find(s => s.id === id);
+    if (updatedSlip) {
+      try {
+        const currentUser = await modulesService.getCurrentUser();
+        await modulesService.addAudit({
+          action: 'Payment Slip Status Updated',
+          entity_type: 'payment',
+          entity_id: updatedSlip.id,
+          entity_name: updatedSlip.slip_no,
+          reason: `Status changed to ${status}`,
+          performed_by: currentUser?.email || 'Unknown',
+          details: `${updatedSlip.vendor_name} | ${updatedSlip.po_ref || 'Manual Entry'}`,
+        });
+      } catch (error) {
+        console.error('Failed to add payment status audit:', error);
+      }
+    }
     showToast(`Status updated to ${status}`, 'success');
   };
 
@@ -139,12 +139,12 @@ export default function SiteRecordsPage() {
     saveSlips(next);
   };
 
-  const handleCreatePayment = (e: React.FormEvent) => {
+  const handleCreatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
     const fd = new FormData(e.target as HTMLFormElement);
-    const slip: PaymentSlip = {
-      id: Math.random().toString(36).substr(2, 9),
-      slip_no: `PS-${new Date().getFullYear()}-${Math.floor(100+Math.random()*900)}`,
+    const slip: PaymentSlipRow = {
+      id: makeClientId('payment'),
+      slip_no: makeDocumentNumber('PS'),
       date: new Date().toISOString().split('T')[0],
       due_date: fd.get('due_date') as string,
       vendor_name: fd.get('vendor_name') as string,
@@ -157,6 +157,20 @@ export default function SiteRecordsPage() {
     };
     saveSlips([slip, ...slips]);
     setCreatePaymentOpen(false);
+    try {
+      const currentUser = await modulesService.getCurrentUser();
+      await modulesService.addAudit({
+        action: 'Payment Slip Created',
+        entity_type: 'payment',
+        entity_id: slip.id,
+        entity_name: slip.slip_no,
+        reason: `Payment slip issued for ${slip.vendor_name}`,
+        performed_by: currentUser?.email || 'Unknown',
+        details: `${slip.po_ref || 'Manual Entry'} | ${formatCurrency(slip.amount)}`,
+      });
+    } catch (error) {
+      console.error('Failed to add payment audit:', error);
+    }
     showToast('Payment Recorded', 'success');
   };
 
@@ -223,10 +237,24 @@ export default function SiteRecordsPage() {
                   <td style={{ textAlign: 'right' }}>
                     <button className={styles.iconBtn} onClick={() => setViewingReceipt(r)}><Eye size={14} /></button>
                     <button className={styles.iconBtn} onClick={() => { setViewingReceipt(r); setTimeout(()=>window.print(),100); }}><Printer size={14} /></button>
-                    <button className={styles.iconBtn} style={{ color: 'var(--text-secondary)' }} onClick={() => {
+                    <button className={styles.iconBtn} style={{ color: 'var(--text-secondary)' }} onClick={async () => {
                         if(confirm('Delete this receipt permanently?')) {
                           const next = receipts.filter(x => x.id !== r.id);
                           saveReceipts(next);
+                          try {
+                            const currentUser = await modulesService.getCurrentUser();
+                            await modulesService.addAudit({
+                              action: 'Delivery Receipt Deleted',
+                              entity_type: 'receipt',
+                              entity_id: r.id,
+                              entity_name: r.receipt_no,
+                              reason: `Receipt deleted for ${r.project_name}`,
+                              performed_by: currentUser?.email || 'Unknown',
+                              details: `${r.vendor_name} | ${r.type}`,
+                            });
+                          } catch (error) {
+                            console.error('Failed to add receipt deletion audit:', error);
+                          }
                           showToast('Receipt deleted', 'success');
                         }
                     }}><Trash2 size={14} /></button>
@@ -289,10 +317,24 @@ export default function SiteRecordsPage() {
                       <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
                         <button className={styles.iconBtn} onClick={() => setViewingSlip(s)}><Eye size={14} /></button>
                         <button className={styles.iconBtn} onClick={() => { setViewingSlip(s); setTimeout(()=>window.print(),100); }}><Printer size={14} /></button>
-                        <button className={styles.iconBtn} style={{ color: 'var(--text-secondary)' }} onClick={() => {
+                        <button className={styles.iconBtn} style={{ color: 'var(--text-secondary)' }} onClick={async () => {
                             if(confirm('Delete permanently?')) {
                               const next = slips.filter(x => x.id !== s.id);
                               saveSlips(next);
+                              try {
+                                const currentUser = await modulesService.getCurrentUser();
+                                await modulesService.addAudit({
+                                  action: 'Payment Slip Deleted',
+                                  entity_type: 'payment',
+                                  entity_id: s.id,
+                                  entity_name: s.slip_no,
+                                  reason: `Payment slip deleted for ${s.vendor_name}`,
+                                  performed_by: currentUser?.email || 'Unknown',
+                                  details: `${s.po_ref || 'Manual Entry'} | ${formatCurrency(s.amount)}`,
+                                });
+                              } catch (error) {
+                                console.error('Failed to add payment deletion audit:', error);
+                              }
                             }
                         }}><Trash2 size={14} /></button>
                       </div>

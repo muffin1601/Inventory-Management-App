@@ -51,9 +51,11 @@ export default function InventoryPage() {
       setReasons(reasonRows);
       if (wh[0]) setSelectedWarehouse(wh[0].id);
       if (wh[1]) setTransferWarehouse(wh[1].id);
-      const current = modulesService.getCurrentUser();
-      setCanAdjust(modulesService.hasPermission(current, 'inventory.adjust'));
-      setCanTransfer(modulesService.hasPermission(current, 'inventory.transfer'));
+      const current = await modulesService.getCurrentUser();
+      if (current) {
+        setCanAdjust(modulesService.hasPermission(current, 'inventory.adjust'));
+        setCanTransfer(modulesService.hasPermission(current, 'inventory.transfer'));
+      }
     }
     load();
     const onUserChange = () => load();
@@ -204,13 +206,14 @@ export default function InventoryPage() {
         quantity: qty,
         notes: `${confirmedReason}: Transfer in <- ${wh.name}`,
       });
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: 'Inventory Transfer',
         entity_type: 'inventory',
         entity_id: selectedVariant,
         entity_name: variantRow.product_name,
         reason: confirmedReason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `${qty} units from ${wh.name} to ${target.name}`,
       });
     } else {
@@ -243,13 +246,14 @@ export default function InventoryPage() {
         quantity: qty,
         notes: confirmedReason,
       });
+      const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
         action: op === 'IN' ? 'Inventory Stock In' : 'Inventory Stock Out',
         entity_type: 'inventory',
         entity_id: selectedVariant,
         entity_name: variantRow.product_name,
         reason: confirmedReason,
-        performed_by: modulesService.getCurrentUser().email,
+        performed_by: currentUser?.email || 'Unknown',
         details: `${qty} units at ${wh.name}`,
       });
     }

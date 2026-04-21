@@ -67,7 +67,23 @@ export interface PermissionRow {
   id: string;
   key: string;
   label: string;
-  module: 'Products' | 'Inventory' | 'Orders' | 'Users' | 'Reports';
+  module:
+    | 'Dashboard'
+    | 'Catalog'
+    | 'Stock'
+    | 'Inventory'
+    | 'Projects'
+    | 'Vendors'
+    | 'Orders'
+    | 'Challans'
+    | 'Deliveries'
+    | 'Payments'
+    | 'Rate Inquiry'
+    | 'Reports'
+    | 'Audit'
+    | 'Users';
+  description?: string;
+  admin_only?: boolean;
 }
 
 export interface RoleRow {
@@ -84,6 +100,9 @@ export interface UserAccessRow {
   role_name: string;
   status: 'ACTIVE' | 'DISABLED';
   custom_permission_keys: string[];
+  revoked_permission_keys?: string[];
+  temporary_password?: string;
+  last_active_at?: string;
 }
 
 export interface AuditTrailRow {
@@ -96,4 +115,62 @@ export interface AuditTrailRow {
   performed_by: string;
   details?: string;
   created_at: string;
+}
+
+export interface ChallanItemRow {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  boqQty?: number;
+  stockQty?: number;
+}
+
+export interface ChallanRow {
+  id: string;
+  challan_no: string;
+  po_no: string;
+  project_name: string;
+  vendor_name: string;
+  dispatch_date: string;
+  status: 'ISSUED' | 'DISPATCHED' | 'DELIVERED';
+  items: ChallanItemRow[];
+}
+
+export interface DeliveryReceiptItemRow {
+  id: string;
+  name: string;
+  quantity: number;
+  unit: string;
+  condition: 'GOOD' | 'DAMAGED' | 'SHORTAGE';
+}
+
+export interface DeliveryReceiptRow {
+  id: string;
+  receipt_no: string;
+  type: 'SITE_DELIVERY' | 'STORE_DELIVERY';
+  date: string;
+  project_name: string;
+  linked_po: string;
+  receiver_name: string;
+  contact: string;
+  vendor_name: string;
+  status: 'VERIFIED' | 'PENDING' | 'DAMAGED';
+  items: DeliveryReceiptItemRow[];
+  remarks?: string;
+}
+
+export interface PaymentSlipRow {
+  id: string;
+  slip_no: string;
+  date: string;
+  due_date: string;
+  vendor_name: string;
+  po_ref: string;
+  amount: number;
+  payment_method: 'BANK_TRANSFER' | 'CASH' | 'CHEQUE' | 'UPI';
+  ref_no: string;
+  prepared_by: string;
+  status: 'ISSUED' | 'DUE' | 'PAID';
+  remarks?: string;
 }
