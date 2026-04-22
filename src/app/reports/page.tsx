@@ -213,7 +213,7 @@ export default function ReportsPage() {
       setIsLoading(true);
       try {
         const currentUser = await modulesService.getCurrentUser();
-        setCanExport(currentUser ? modulesService.hasPermission(currentUser, "reports.export") : false);
+        setCanExport(currentUser ? await modulesService.hasPermission(currentUser, "reports.export") : false);
 
         const [stockRows, orderRows, movementRows, auditRows, projectList, boqList, vendorRows] = await Promise.all([
           modulesService.getInventorySnapshot(),

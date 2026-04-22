@@ -28,8 +28,8 @@ function makeDocumentNumber(prefix: string) {
 
 export default function SiteRecordsPage() {
   const [activeTab, setActiveTab] = useState<Tab>('RECEIPTS');
-  const [receipts, setReceipts] = useState<DeliveryReceiptRow[]>(() => modulesService.getDeliveryReceipts());
-  const [slips, setSlips] = useState<PaymentSlipRow[]>(() => modulesService.getPaymentSlips());
+  const [receipts, setReceipts] = useState<DeliveryReceiptRow[]>([]);
+  const [slips, setSlips] = useState<PaymentSlipRow[]>([]);
   const [search, setSearch] = useState('');
   
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
@@ -41,7 +41,7 @@ export default function SiteRecordsPage() {
   const [viewingReceipt, setViewingReceipt] = useState<DeliveryReceiptRow | null>(null);
   const [viewingSlip, setViewingSlip] = useState<PaymentSlipRow | null>(null);
   
-  const { showToast } = useUi();
+  const { showToast, confirmAction } = useUi();
 
   // Modal States
   const [newReceipt, setNewReceipt] = useState<Partial<DeliveryReceiptRow>>({
@@ -50,14 +50,18 @@ export default function SiteRecordsPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      const [projRes, orderRes, prodRes] = await Promise.all([
+      const [projRes, orderRes, prodRes, receiptRows, slipRows] = await Promise.all([
         projectsService.listProjects(),
         modulesService.getOrders(),
-        inventoryService.getProducts()
+        inventoryService.getProducts(),
+        modulesService.getDeliveryReceipts(),
+        modulesService.getPaymentSlips(),
       ]);
       setProjects(projRes.projects);
       setOrders(orderRes.filter(o => o.type === 'PURCHASE'));
       setCatalogItems(prodRes);
+      setReceipts(receiptRows);
+      setSlips(slipRows);
     };
     loadData();
 
@@ -84,24 +88,40 @@ export default function SiteRecordsPage() {
       receipt_no: makeDocumentNumber('DR'),
       date: new Date().toISOString().split('T')[0]
     };
+    const confirmed = await confirmAction({
+      title: 'Record Material Receipt',
+      message: `Are you sure you want to record this ${newReceipt.type?.replace('_', ' ')} for ${newReceipt.project_name}?`,
+      confirmText: 'Record Receipt',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed.confirmed) return;
+
     saveReceipts([receipt, ...receipts]);
     setCreateReceiptOpen(false);
     setNewReceipt({ type: 'SITE_DELIVERY', status: 'VERIFIED', items: [] });
     try {
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: 'Delivery Receipt Created',
+        action: 'RECEIPT_CREATED',
         entity_type: 'receipt',
         entity_id: receipt.id,
         entity_name: receipt.receipt_no,
-        reason: `Receipt recorded for ${receipt.project_name}`,
+        reason: `Material receipt recorded for ${receipt.project_name}`,
         performed_by: currentUser?.email || 'Unknown',
-        details: `${receipt.type} | ${receipt.items.length} items | ${receipt.vendor_name}`,
+        details: `${receipt.type} | ${receipt.items.length} items | Vendor: ${receipt.vendor_name}`,
+        new_values: {
+          project_name: receipt.project_name,
+          vendor_name: receipt.vendor_name,
+          type: receipt.type,
+          items_count: receipt.items.length,
+          status: receipt.status
+        }
       });
+      showToast('Receipt Created', 'success');
     } catch (error) {
       console.error('Failed to add receipt audit:', error);
     }
-    showToast('Receipt Created', 'success');
   };
 
   const getSlipStatus = (slip: PaymentSlipRow) => {
@@ -112,26 +132,40 @@ export default function SiteRecordsPage() {
   };
 
   const updateSlipStatus = async (id: string, status: 'ISSUED' | 'DUE' | 'PAID') => {
+    const slip = slips.find(s => s.id === id);
+    if (!slip) return;
+
+    const confirmed = await confirmAction({
+      title: 'Update Payment Status',
+      message: `Are you sure you want to change the status of slip ${slip.slip_no} to ${status}?`,
+      confirmText: 'Update Status',
+      cancelText: 'Cancel',
+      requireReason: status === 'PAID',
+      reasonLabel: 'Payment Reference',
+    });
+
+    if (!confirmed.confirmed) return;
+
     const next = slips.map(s => s.id === id ? { ...s, status } : s);
     saveSlips(next);
-    const updatedSlip = next.find(s => s.id === id);
-    if (updatedSlip) {
-      try {
-        const currentUser = await modulesService.getCurrentUser();
-        await modulesService.addAudit({
-          action: 'Payment Slip Status Updated',
-          entity_type: 'payment',
-          entity_id: updatedSlip.id,
-          entity_name: updatedSlip.slip_no,
-          reason: `Status changed to ${status}`,
-          performed_by: currentUser?.email || 'Unknown',
-          details: `${updatedSlip.vendor_name} | ${updatedSlip.po_ref || 'Manual Entry'}`,
-        });
-      } catch (error) {
-        console.error('Failed to add payment status audit:', error);
-      }
+    
+    try {
+      const currentUser = await modulesService.getCurrentUser();
+      await modulesService.addAudit({
+        action: 'PAYMENT_STATUS_UPDATED',
+        entity_type: 'payment',
+        entity_id: slip.id,
+        entity_name: slip.slip_no,
+        reason: confirmed.reason || `Status changed to ${status}`,
+        performed_by: currentUser?.email || 'Unknown',
+        details: `${slip.vendor_name} | ${slip.po_ref || 'Manual Entry'} | Status: ${status}`,
+        old_values: { status: slip.status },
+        new_values: { status }
+      });
+      showToast(`Status updated to ${status}`, 'success');
+    } catch (error) {
+      console.error('Failed to add payment status audit:', error);
     }
-    showToast(`Status updated to ${status}`, 'success');
   };
 
   const updateSlipDueDate = (id: string, date: string) => {
@@ -155,23 +189,38 @@ export default function SiteRecordsPage() {
       prepared_by: 'Admin',
       status: 'ISSUED'
     };
+    const confirmed = await confirmAction({
+      title: 'Record Payment Voucher',
+      message: `Are you sure you want to record a payment of ${formatCurrency(slip.amount)} to ${slip.vendor_name}?`,
+      confirmText: 'Record Payment',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed.confirmed) return;
+
     saveSlips([slip, ...slips]);
     setCreatePaymentOpen(false);
     try {
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: 'Payment Slip Created',
+        action: 'PAYMENT_CREATED',
         entity_type: 'payment',
         entity_id: slip.id,
         entity_name: slip.slip_no,
         reason: `Payment slip issued for ${slip.vendor_name}`,
         performed_by: currentUser?.email || 'Unknown',
         details: `${slip.po_ref || 'Manual Entry'} | ${formatCurrency(slip.amount)}`,
+        new_values: {
+          vendor_name: slip.vendor_name,
+          amount: slip.amount,
+          payment_method: slip.payment_method,
+          status: slip.status
+        }
       });
+      showToast('Payment Recorded', 'success');
     } catch (error) {
       console.error('Failed to add payment audit:', error);
     }
-    showToast('Payment Recorded', 'success');
   };
 
   const filteredReceipts = receipts.filter(r => r.receipt_no.toLowerCase().includes(search.toLowerCase()) || r.project_name.toLowerCase().includes(search.toLowerCase()));
@@ -238,24 +287,36 @@ export default function SiteRecordsPage() {
                     <button className={styles.iconBtn} onClick={() => setViewingReceipt(r)}><Eye size={14} /></button>
                     <button className={styles.iconBtn} onClick={() => { setViewingReceipt(r); setTimeout(()=>window.print(),100); }}><Printer size={14} /></button>
                     <button className={styles.iconBtn} style={{ color: 'var(--text-secondary)' }} onClick={async () => {
-                        if(confirm('Delete this receipt permanently?')) {
+                        const confirmed = await confirmAction({
+                          title: 'Delete Receipt',
+                          message: `Are you sure you want to delete receipt ${r.receipt_no}? This action cannot be undone.`,
+                          confirmText: 'Delete',
+                          cancelText: 'Cancel',
+                          requireReason: true,
+                        });
+                        if (confirmed.confirmed) {
                           const next = receipts.filter(x => x.id !== r.id);
                           saveReceipts(next);
                           try {
                             const currentUser = await modulesService.getCurrentUser();
                             await modulesService.addAudit({
-                              action: 'Delivery Receipt Deleted',
+                              action: 'RECEIPT_DELETED',
                               entity_type: 'receipt',
                               entity_id: r.id,
                               entity_name: r.receipt_no,
-                              reason: `Receipt deleted for ${r.project_name}`,
+                              reason: confirmed.reason || `Receipt deleted for ${r.project_name}`,
                               performed_by: currentUser?.email || 'Unknown',
                               details: `${r.vendor_name} | ${r.type}`,
+                              old_values: {
+                                receipt_no: r.receipt_no,
+                                project_name: r.project_name,
+                                type: r.type
+                              }
                             });
+                            showToast('Receipt deleted', 'success');
                           } catch (error) {
                             console.error('Failed to add receipt deletion audit:', error);
                           }
-                          showToast('Receipt deleted', 'success');
                         }
                     }}><Trash2 size={14} /></button>
                   </td>
@@ -318,20 +379,33 @@ export default function SiteRecordsPage() {
                         <button className={styles.iconBtn} onClick={() => setViewingSlip(s)}><Eye size={14} /></button>
                         <button className={styles.iconBtn} onClick={() => { setViewingSlip(s); setTimeout(()=>window.print(),100); }}><Printer size={14} /></button>
                         <button className={styles.iconBtn} style={{ color: 'var(--text-secondary)' }} onClick={async () => {
-                            if(confirm('Delete permanently?')) {
+                            const confirmed = await confirmAction({
+                              title: 'Delete Payment Slip',
+                              message: `Are you sure you want to delete payment slip ${s.slip_no}?`,
+                              confirmText: 'Delete',
+                              cancelText: 'Cancel',
+                              requireReason: true,
+                            });
+                            if (confirmed.confirmed) {
                               const next = slips.filter(x => x.id !== s.id);
                               saveSlips(next);
                               try {
                                 const currentUser = await modulesService.getCurrentUser();
                                 await modulesService.addAudit({
-                                  action: 'Payment Slip Deleted',
+                                  action: 'PAYMENT_DELETED',
                                   entity_type: 'payment',
                                   entity_id: s.id,
                                   entity_name: s.slip_no,
-                                  reason: `Payment slip deleted for ${s.vendor_name}`,
+                                  reason: confirmed.reason || `Payment slip deleted for ${s.vendor_name}`,
                                   performed_by: currentUser?.email || 'Unknown',
                                   details: `${s.po_ref || 'Manual Entry'} | ${formatCurrency(s.amount)}`,
+                                  old_values: {
+                                    slip_no: s.slip_no,
+                                    vendor_name: s.vendor_name,
+                                    amount: s.amount
+                                  }
                                 });
+                                showToast('Payment slip deleted', 'success');
                               } catch (error) {
                                 console.error('Failed to add payment deletion audit:', error);
                               }

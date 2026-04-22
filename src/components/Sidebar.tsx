@@ -81,7 +81,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
 
   React.useEffect(() => {
     const syncCurrentUser = async () => {
-      const current = modulesService.getAuthenticatedUser() || await modulesService.getCurrentUser();
+      const current = (await modulesService.getAuthenticatedUser()) || await modulesService.getCurrentUser();
       if (current) {
         setCurrentUserLabel({
           name: current.full_name,
@@ -92,6 +92,7 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
       }
     };
 
+    void syncCurrentUser();
     window.addEventListener('ims-current-user-changed', syncCurrentUser);
     window.addEventListener('ims-users-changed', syncCurrentUser);
     return () => {

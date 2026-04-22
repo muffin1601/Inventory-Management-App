@@ -181,10 +181,10 @@ export default function OrdersPage() {
 
       const current = await modulesService.getCurrentUser();
       if (current) {
-        setCanCreate(modulesService.hasPermission(current, 'orders.create'));
-        setCanApprove(modulesService.hasPermission(current, 'orders.approve'));
-        setCanCancel(modulesService.hasPermission(current, 'orders.cancel'));
-        setIsAdmin(modulesService.hasPermission(current, 'roles.manage') || current.role_name === 'Super Admin');
+        setCanCreate(await modulesService.hasPermission(current, 'orders.create'));
+        setCanApprove(await modulesService.hasPermission(current, 'orders.approve'));
+        setCanCancel(await modulesService.hasPermission(current, 'orders.cancel'));
+        setIsAdmin((await modulesService.hasPermission(current, 'roles.manage')) || current.role_name === 'Super Admin');
       }
     }
 
@@ -350,6 +350,15 @@ export default function OrdersPage() {
 
     const project = projects.find((item) => item.id === draft.project_id);
 
+    const confirmed = await confirmAction({
+      title: 'Create Purchase Order',
+      message: `Are you sure you want to create this purchase order for ${vendor.name}? Total items: ${orderSummary.lineCount}.`,
+      confirmText: 'Create PO',
+      cancelText: 'Cancel',
+    });
+
+    if (!confirmed.confirmed) return;
+
     try {
       await modulesService.createOrder({
         type: 'PURCHASE',
@@ -376,6 +385,25 @@ export default function OrdersPage() {
         }),
         delivery_address: draft.delivery_address,
         payment_terms: draft.payment_terms,
+      });
+
+      const res = await modulesService.getOrders();
+      const newOrder = res.find(o => o.order_number === (res as any).order_number) || res[0];
+
+      // Log Audit
+      await modulesService.addAudit({
+        action: 'CREATE_ORDER',
+        entity_type: 'order',
+        entity_id: newOrder?.id || 'new',
+        entity_name: newOrder?.order_number || 'New Order',
+        reason: 'Manual order creation',
+        details: `Created ${newOrder?.type} order for ${newOrder?.vendor_name}. Items: ${validLines.length}`,
+        new_values: {
+          vendor_name: vendor.name,
+          project_name: project?.name,
+          items_count: validLines.length,
+          total_amount: orderSummary.totalAmount
+        }
       });
 
       setCreateOpen(false);
@@ -455,13 +483,15 @@ export default function OrdersPage() {
     try {
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: 'Order Approved',
+        action: 'ORDER_APPROVED',
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
         reason: confirmation.reason,
         performed_by: currentUser?.email || 'Unknown',
-        details: `${order.type} for ${order.vendor_name || order.entity_name}`,
+        details: `${order.type} approved for ${order.vendor_name || order.entity_name}. Stock impacted.`,
+        old_values: { status: order.status },
+        new_values: { status: 'APPROVED' }
       });
     } catch (error) {
       console.error('Failed to add audit:', error);
@@ -502,13 +532,15 @@ export default function OrdersPage() {
     try {
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: 'Order Status Changed',
+        action: 'ORDER_STATUS_CHANGED',
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
         reason: confirmation.reason,
         performed_by: currentUser?.email || 'Unknown',
-        details: `Status changed to ${statusLabels[newStatus]}`,
+        details: `Status changed from ${order.status} to ${newStatus}`,
+        old_values: { status: order.status },
+        new_values: { status: newStatus }
       });
     } catch (error) {
       console.error('Failed to add audit:', error);

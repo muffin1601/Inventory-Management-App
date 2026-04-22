@@ -98,7 +98,6 @@ export default function PermissionTest() {
           {' '}
           <button 
             onClick={() => {
-              // @ts-ignore
               modulesService._debugResetAllData();
             }}
             style={{

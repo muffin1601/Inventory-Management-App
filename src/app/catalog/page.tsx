@@ -83,9 +83,9 @@ export default function ProductsPage() {
       fetchLookups();
       const current = await modulesService.getCurrentUser();
       if (current) {
-        setCanCreateProducts(modulesService.hasPermission(current, 'products.create'));
-        setCanEditProducts(modulesService.hasPermission(current, 'products.edit'));
-        setCanDeleteProducts(modulesService.hasPermission(current, 'products.delete'));
+        setCanCreateProducts(await modulesService.hasPermission(current, 'products.create'));
+        setCanEditProducts(await modulesService.hasPermission(current, 'products.edit'));
+        setCanDeleteProducts(await modulesService.hasPermission(current, 'products.delete'));
       }
     };
 
@@ -94,9 +94,9 @@ export default function ProductsPage() {
     const onUserChange = async () => {
       const refreshed = await modulesService.getCurrentUser();
       if (refreshed) {
-        setCanCreateProducts(modulesService.hasPermission(refreshed, 'products.create'));
-        setCanEditProducts(modulesService.hasPermission(refreshed, 'products.edit'));
-        setCanDeleteProducts(modulesService.hasPermission(refreshed, 'products.delete'));
+        setCanCreateProducts(await modulesService.hasPermission(refreshed, 'products.create'));
+        setCanEditProducts(await modulesService.hasPermission(refreshed, 'products.edit'));
+        setCanDeleteProducts(await modulesService.hasPermission(refreshed, 'products.delete'));
       }
     };
 
@@ -283,8 +283,20 @@ export default function ProductsPage() {
   const confirmDeleteVariant = async () => {
     if (!deleteReason.trim()) return showToast("Please provide a reason for deletion.", 'error');
     try {
+      const variant = activeProductForSingle?.variants?.find((v: any) => v.id === variantToDelete);
       const { error } = await supabase.from('variants').delete().eq('id', variantToDelete);
       if (error) throw error;
+      
+      // Log Audit
+      await modulesService.addAudit({
+        action: 'DELETE_VARIANT',
+        entity_type: 'inventory',
+        entity_id: variantToDelete || '',
+        entity_name: variant?.sku || 'Unknown Variant',
+        reason: deleteReason,
+        details: `Variant ${variant?.sku} deleted from product ${activeProductForSingle?.name}`
+      });
+
       setIsDeleteModalOpen(false);
       fetchProducts();
       showToast("Item option deleted.", 'success');
@@ -298,7 +310,19 @@ export default function ProductsPage() {
   const confirmDeleteAction = async () => {
     if (!deleteConfirm.productId || !deleteConfirm.reason) return;
     try {
+      const product = products.find(p => p.id === deleteConfirm.productId);
       await inventoryService.deleteProduct(deleteConfirm.productId);
+      
+      // Log Audit
+      await modulesService.addAudit({
+        action: 'DELETE_PRODUCT',
+        entity_type: 'inventory',
+        entity_id: deleteConfirm.productId,
+        entity_name: product?.name || 'Unknown Product',
+        reason: deleteConfirm.reason,
+        details: `Full product ${product?.name} and all its variants deleted.`
+      });
+
       setDeleteConfirm({ isOpen: false, productId: null, reason: '' });
       fetchProducts();
       showToast("Product deleted.", 'success');
@@ -501,10 +525,27 @@ export default function ProductsPage() {
           price: v.price || 0
         }));
 
+      let result;
       if (editingProductId) {
-        await inventoryService.updateProduct(editingProductId, productData, enabledVariants);
+        result = await inventoryService.updateProduct(editingProductId, productData, enabledVariants);
+        await modulesService.addAudit({
+          action: 'UPDATE_PRODUCT',
+          entity_type: 'inventory',
+          entity_id: editingProductId,
+          entity_name: productName,
+          reason: 'Product details or variants updated',
+          details: `Updated product ${productName}. Variants count: ${enabledVariants.length}`
+        });
       } else {
-        await inventoryService.createProduct(productData, enabledVariants);
+        result = await inventoryService.createProduct(productData, enabledVariants);
+        await modulesService.addAudit({
+          action: 'CREATE_PRODUCT',
+          entity_type: 'inventory',
+          entity_id: (result as any)?.id || 'new',
+          entity_name: productName,
+          reason: 'New product added to catalog',
+          details: `Created product ${productName} with ${enabledVariants.length} variants.`
+        });
       }
       
       setIsCreating(false);
@@ -512,9 +553,10 @@ export default function ProductsPage() {
       setEditingProduct(null);
       resetForm();
       fetchProducts();
+      showToast(editingProductId ? "Product updated." : "Product created.", 'success');
     } catch (err) {
       console.error("Failed to save product:", err);
-      alert("Failed to save product.");
+      showToast("Failed to save product.", 'error');
     } finally {
       setIsGenerating(false);
     }

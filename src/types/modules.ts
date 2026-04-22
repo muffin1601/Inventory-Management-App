@@ -98,10 +98,11 @@ export interface UserAccessRow {
   email: string;
   role_id: string;
   role_name: string;
-  status: 'ACTIVE' | 'DISABLED';
+  status: 'ACTIVE' | 'DISABLED' | 'PENDING';
   custom_permission_keys: string[];
   revoked_permission_keys?: string[];
-  temporary_password?: string;
+  requires_password_change?: boolean;
+  password_changed_at?: string;
   last_active_at?: string;
 }
 
@@ -109,11 +110,14 @@ export interface AuditTrailRow {
   id: string;
   action: string;
   entity_type: string;
-  entity_id: string;
-  entity_name: string;
-  reason: string;
-  performed_by: string;
+  entity_id?: string;
+  entity_name?: string;
+  reason?: string;
+  performed_by?: string; // UUID (string) of the actor
+  old_values?: any;
+  new_values?: any;
   details?: string;
+  ip_address?: string;
   created_at: string;
 }
 

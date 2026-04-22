@@ -1,6 +1,8 @@
 // Debug script to diagnose permission issues
 // Run this in browser console: eval(atob('PASTE_ENCODED_CONTENT'))
 
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 export function debugPermissions() {
   const { modulesService } = require('@/lib/services/modules');
   
@@ -35,7 +37,7 @@ export function debugPermissions() {
     console.log(`Can Access Dashboard (${authenticatedUser.full_name}):`, hasPermission);
     
     // Find the user's role
-    const userRole = allRoles.find((r: RoleRow) => r.id === authenticatedUser.role_id);
+    const userRole = allRoles.find((r: any) => r.id === authenticatedUser.role_id);
     console.log('User Role:', userRole);
     console.log('Role Permission Keys:', userRole?.permission_keys);
     console.log('Has dashboard.view?', userRole?.permission_keys?.includes('dashboard.view'));

@@ -15,6 +15,7 @@ import type { ChallanRow as Challan } from '@/types/modules';
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
 export default function ChallansPage() {
+  const { showToast, confirmAction } = useUi();
   const [challans, setChallans] = useState<Challan[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -29,7 +30,6 @@ export default function ChallansPage() {
     status: 'ISSUED',
     items: []
   });
-  const { showToast } = useUi();
 
   // Load projects and inventory
   useEffect(() => {
@@ -39,10 +39,13 @@ export default function ChallansPage() {
     };
     loadData();
 
-    const saved = modulesService.getChallans();
-    if (saved.length > 0) {
-      setChallans(saved);
-    } else {
+    void (async () => {
+      const saved = await modulesService.getChallans();
+      if (saved.length > 0) {
+        setChallans(saved);
+        return;
+      }
+
       // Mock data for first load
       const mock: Challan[] = [
         {
@@ -55,8 +58,8 @@ export default function ChallansPage() {
           status: 'DELIVERED',
           items: [
             { id: '1', name: 'Gate Valve 150mm', quantity: 15, unit: 'Nos' },
-            { id: '2', name: 'Check Valve 100mm', quantity: 5, unit: 'Nos' }
-          ]
+            { id: '2', name: 'Check Valve 100mm', quantity: 5, unit: 'Nos' },
+          ],
         },
         {
           id: '2',
@@ -66,14 +69,12 @@ export default function ChallansPage() {
           vendor_name: 'Clearline Pumps',
           dispatch_date: '2024-03-20',
           status: 'DISPATCHED',
-          items: [
-            { id: '3', name: 'Vertical Multistage Pump', quantity: 2, unit: 'Sets' }
-          ]
-        }
+          items: [{ id: '3', name: 'Vertical Multistage Pump', quantity: 2, unit: 'Sets' }],
+        },
       ];
       setChallans(mock);
       modulesService.saveChallans(mock);
-    }
+    })();
   }, []);
 
   const saveChallans = (updated: Challan[]) => {
@@ -162,13 +163,19 @@ export default function ChallansPage() {
     try {
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: 'Challan Created',
+        action: 'CHALLAN_CREATED',
         entity_type: 'challan',
         entity_id: challan.id,
         entity_name: challan.challan_no,
-        reason: `Dispatch created for ${challan.project_name}`,
+        reason: `New dispatch for project: ${challan.project_name}`,
         performed_by: currentUser?.email || 'Unknown',
         details: `${challan.items.length} items | Vendor: ${challan.vendor_name}`,
+        new_values: {
+          project_name: challan.project_name,
+          vendor_name: challan.vendor_name,
+          items_count: challan.items.length,
+          status: challan.status
+        }
       });
     } catch (error) {
       console.error('Failed to add challan audit:', error);
@@ -177,56 +184,83 @@ export default function ChallansPage() {
   };
 
   const deleteChallan = async (id: string) => {
-    if (confirm('Are you sure you want to delete this challan?')) {
-      const existing = challans.find(c => c.id === id);
-      saveChallans(challans.filter(c => c.id !== id));
-      if (existing) {
-        try {
-          const currentUser = await modulesService.getCurrentUser();
-          await modulesService.addAudit({
-            action: 'Challan Deleted',
-            entity_type: 'challan',
-            entity_id: existing.id,
-            entity_name: existing.challan_no,
-            reason: `Dispatch deleted for ${existing.project_name}`,
-            performed_by: currentUser?.email || 'Unknown',
-            details: `Vendor: ${existing.vendor_name}`,
-          });
-        } catch (error) {
-          console.error('Failed to add challan deletion audit:', error);
+    const existing = challans.find(c => c.id === id);
+    if (!existing) return;
+
+    const confirmation = await confirmAction({
+      title: 'Delete Delivery Challan?',
+      message: `Are you sure you want to delete ${existing.challan_no}? This will permanently remove the record.`,
+      confirmText: 'Delete Challan',
+      requireReason: true,
+      reasonLabel: 'Reason for deletion',
+      reasonPlaceholder: 'Why are you deleting this dispatch record?'
+    });
+
+    if (!confirmation.confirmed) return;
+
+    saveChallans(challans.filter(c => c.id !== id));
+    
+    try {
+      const currentUser = await modulesService.getCurrentUser();
+      await modulesService.addAudit({
+        action: 'CHALLAN_DELETED',
+        entity_type: 'challan',
+        entity_id: existing.id,
+        entity_name: existing.challan_no,
+        reason: confirmation.reason,
+        performed_by: currentUser?.email || 'Unknown',
+        details: `Deleted challan for ${existing.project_name}. Vendor: ${existing.vendor_name}`,
+        old_values: {
+          challan_no: existing.challan_no,
+          project_name: existing.project_name,
+          status: existing.status
         }
-      }
-      showToast('Challan deleted', 'info');
+      });
+    } catch (error) {
+      console.error('Failed to add challan deletion audit:', error);
     }
+    showToast('Challan deleted', 'info');
   };
 
   const updateStatus = async (id: string, status: Challan['status']) => {
+    const existing = challans.find(c => c.id === id);
+    if (!existing || existing.status === status) return;
+
+    const confirmation = await confirmAction({
+      title: `Update Status to ${status}?`,
+      message: `Change status of ${existing.challan_no} from ${existing.status} to ${status}?`,
+      confirmText: 'Update Status',
+      requireReason: true,
+      reasonLabel: 'Status update reason',
+      reasonPlaceholder: 'Please provide a reason for this status change...'
+    });
+
+    if (!confirmation.confirmed) return;
+
     if (status === 'DISPATCHED') {
-      if (!confirm('Generate Gate Pass? Stock will be deducted and dispatch initiated.')) {
-        return;
-      }
       showToast('Gate Pass Generated successfully', 'success');
     }
     
     const updated = challans.map(c => c.id === id ? { ...c, status } : c);
     saveChallans(updated);
-    const updatedChallan = updated.find(c => c.id === id);
-    if (updatedChallan) {
-      try {
-        const currentUser = await modulesService.getCurrentUser();
-        await modulesService.addAudit({
-          action: 'Challan Status Updated',
-          entity_type: 'challan',
-          entity_id: updatedChallan.id,
-          entity_name: updatedChallan.challan_no,
-          reason: `Status changed to ${status}`,
-          performed_by: currentUser?.email || 'Unknown',
-          details: `${updatedChallan.project_name} | ${updatedChallan.vendor_name}`,
-        });
-      } catch (error) {
-        console.error('Failed to add challan status audit:', error);
-      }
+    
+    try {
+      const currentUser = await modulesService.getCurrentUser();
+      await modulesService.addAudit({
+        action: 'CHALLAN_STATUS_UPDATED',
+        entity_type: 'challan',
+        entity_id: existing.id,
+        entity_name: existing.challan_no,
+        reason: confirmation.reason,
+        performed_by: currentUser?.email || 'Unknown',
+        details: `Status changed to ${status}`,
+        old_values: { status: existing.status },
+        new_values: { status }
+      });
+    } catch (error) {
+      console.error('Failed to add challan status audit:', error);
     }
+
     if (viewingChallan?.id === id) {
       setViewingChallan({ ...viewingChallan, status });
     }
@@ -381,16 +415,14 @@ export default function ChallansPage() {
                         <Printer size={16} />
                       </button>
                       
-                      <button 
-                        className={styles.actionBtn} 
-                        style={{ color: 'var(--text-secondary)' }} 
-                        title="Delete"
-                        onClick={() => {
-                          if(confirm('Delete this record?')) deleteChallan(challan.id);
-                        }}
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                        <button 
+                          className={styles.actionBtn} 
+                          style={{ color: 'var(--text-secondary)' }} 
+                          title="Delete"
+                          onClick={() => deleteChallan(challan.id)}
+                        >
+                          <Trash2 size={14} />
+                        </button>
                     </div>
                   </td>
                 </tr>

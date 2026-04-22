@@ -15,7 +15,11 @@ import type {
   PaymentSlipRow,
 } from '@/types/modules';
 
-// Re-export everything from the database service
+/**
+ * Backward compatibility wrapper for the modules service.
+ * This ensures all methods from the database service are available
+ * even if they were added later.
+ */
 export const modulesService = {
   // Authentication methods (async versions)
   signIn: dbService.signIn.bind(dbService),
@@ -30,6 +34,8 @@ export const modulesService = {
   getUsers: dbService.getUsers.bind(dbService),
   saveUser: dbService.saveUser.bind(dbService),
   createUser: dbService.createUser.bind(dbService),
+  updateUserDetails: dbService.updateUserDetails.bind(dbService),
+  changeUserPassword: dbService.changeUserPassword.bind(dbService),
   saveUsers: dbService.saveUsers.bind(dbService),
   setCurrentUser: dbService.setCurrentUser.bind(dbService),
 
@@ -52,86 +58,28 @@ export const modulesService = {
   addAudit: dbService.addAudit.bind(dbService),
 
   // Legacy synchronous versions for backward compatibility
-  getCurrentUserSync: dbService.getCurrentUserLegacy.bind(dbService),
-  hasActiveSessionSync: dbService.hasActiveSessionLegacy.bind(dbService),
   getAuthenticatedUserSync: dbService.getAuthenticatedUserSync.bind(dbService),
 
-  // Legacy synchronous methods (deprecated - use async versions)
-  getAuthenticatedUser: dbService.getAuthenticatedUserSync.bind(dbService),
+  // Inventory and business logic methods
+  getInventorySnapshot: dbService.getInventorySnapshot.bind(dbService),
+  getMovements: dbService.getMovements.bind(dbService),
+  addMovement: dbService.addMovement.bind(dbService),
+  createOrder: dbService.createOrder.bind(dbService),
+  updateOrderStatus: dbService.updateOrderStatus.bind(dbService),
+  getOrders: dbService.getOrders.bind(dbService),
+  getChallans: dbService.getChallans.bind(dbService),
+  saveChallans: dbService.saveChallans.bind(dbService),
+  getDeliveryReceipts: dbService.getDeliveryReceipts.bind(dbService),
+  saveDeliveryReceipts: dbService.saveDeliveryReceipts.bind(dbService),
+  getPaymentSlips: dbService.getPaymentSlips.bind(dbService),
+  savePaymentSlips: dbService.savePaymentSlips.bind(dbService),
 
-  // Inventory and business logic methods (keeping localStorage for now)
-  // These will be migrated to database in a future update
-  getInventorySnapshot: async (): Promise<InventorySnapshotRow[]> => {
-    // For now, keep using localStorage - this would need inventory service integration
-    console.warn('getInventorySnapshot: Using legacy localStorage implementation');
-    return [];
-  },
-
-  getMovements: async (): Promise<StockMovementRow[]> => {
-    // For now, keep using localStorage - this would need inventory service integration
-    console.warn('getMovements: Using legacy localStorage implementation');
-    return [];
-  },
-
-  addMovement: async (input: Omit<StockMovementRow, 'id' | 'created_at'>): Promise<StockMovementRow> => {
-    console.warn('addMovement: Using legacy localStorage implementation');
-    return {} as StockMovementRow;
-  },
-
-  createOrder: async (input: any): Promise<OrderRow> => {
-    console.warn('createOrder: Using legacy localStorage implementation');
-    return {} as OrderRow;
-  },
-
-  updateOrderStatus: async (orderId: string, status: OrderRow['status']): Promise<void> => {
-    console.warn('updateOrderStatus: Using legacy localStorage implementation');
-  },
-
-  getOrders: async (): Promise<OrderRow[]> => {
-    console.warn('getOrders: Using legacy localStorage implementation');
-    return [];
-  },
-
-  getChallans: (): ChallanRow[] => {
-    console.warn('getChallans: Using legacy localStorage implementation');
-    return [];
-  },
-
-  saveChallans: (challans: ChallanRow[]): void => {
-    console.warn('saveChallans: Using legacy localStorage implementation');
-  },
-
-  getDeliveryReceipts: (): DeliveryReceiptRow[] => {
-    console.warn('getDeliveryReceipts: Using legacy localStorage implementation');
-    return [];
-  },
-
-  saveDeliveryReceipts: (receipts: DeliveryReceiptRow[]): void => {
-    console.warn('saveDeliveryReceipts: Using legacy localStorage implementation');
-  },
-
-  getPaymentSlips: (): PaymentSlipRow[] => {
-    console.warn('getPaymentSlips: Using legacy localStorage implementation');
-    return [];
-  },
-
-  savePaymentSlips: (slips: PaymentSlipRow[]): void => {
-    console.warn('savePaymentSlips: Using legacy localStorage implementation');
-  },
-
-  // Debug methods (keep for troubleshooting)
+  // Debug methods
   _debugResetAllData: async () => {
-    console.warn('⚠️ Debug method called - this should not be used in production');
-    // This would clear database data - not implemented for safety
+    console.warn('⚠️ Debug method called - not available in production');
   },
 
   _debugShowState: async () => {
-    console.log('🔍 Current database state:');
-    const users = await dbService.getUsers();
-    const roles = await dbService.getRoles();
-    const audit = await dbService.getAuditTrail();
-    console.log('Users:', users.length);
-    console.log('Roles:', roles.length);
-    console.log('Audit entries:', audit.length);
+    await (dbService as any)._debugShowState?.();
   },
 };

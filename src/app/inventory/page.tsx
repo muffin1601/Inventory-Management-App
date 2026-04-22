@@ -53,8 +53,8 @@ export default function InventoryPage() {
       if (wh[1]) setTransferWarehouse(wh[1].id);
       const current = await modulesService.getCurrentUser();
       if (current) {
-        setCanAdjust(modulesService.hasPermission(current, 'inventory.adjust'));
-        setCanTransfer(modulesService.hasPermission(current, 'inventory.transfer'));
+        setCanAdjust(await modulesService.hasPermission(current, 'inventory.adjust'));
+        setCanTransfer(await modulesService.hasPermission(current, 'inventory.transfer'));
       }
     }
     load();
@@ -208,13 +208,19 @@ export default function InventoryPage() {
       });
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: 'Inventory Transfer',
+        action: 'INVENTORY_TRANSFER',
         entity_type: 'inventory',
         entity_id: selectedVariant,
         entity_name: variantRow.product_name,
         reason: confirmedReason,
         performed_by: currentUser?.email || 'Unknown',
-        details: `${qty} units from ${wh.name} to ${target.name}`,
+        details: `Transferred ${qty} units of ${variantRow.sku} from ${wh.name} to ${target.name}`,
+        new_values: {
+          from_warehouse: wh.name,
+          to_warehouse: target.name,
+          quantity: qty,
+          sku: variantRow.sku
+        }
       });
     } else {
       const confirmation = await confirmAction({
@@ -248,13 +254,19 @@ export default function InventoryPage() {
       });
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
-        action: op === 'IN' ? 'Inventory Stock In' : 'Inventory Stock Out',
+        action: op === 'IN' ? 'INVENTORY_STOCK_IN' : 'INVENTORY_STOCK_OUT',
         entity_type: 'inventory',
         entity_id: selectedVariant,
         entity_name: variantRow.product_name,
         reason: confirmedReason,
         performed_by: currentUser?.email || 'Unknown',
-        details: `${qty} units at ${wh.name}`,
+        details: `${op === 'IN' ? 'Received' : 'Issued'} ${qty} units of ${variantRow.sku} at ${wh.name}`,
+        new_values: {
+          warehouse_name: wh.name,
+          operation: op,
+          quantity: qty,
+          sku: variantRow.sku
+        }
       });
     }
 

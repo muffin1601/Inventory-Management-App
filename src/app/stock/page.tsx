@@ -164,9 +164,9 @@ export default function StockPage() {
       setReasons(reasonRows);
 
       const current = await modulesService.getCurrentUser();
-      setCanAdjust(current ? modulesService.hasPermission(current, 'inventory.adjust') : false);
-      setCanEditProducts(current ? modulesService.hasPermission(current, 'products.edit') : false);
-      setCanDeleteProducts(current ? modulesService.hasPermission(current, 'products.delete') : false);
+      setCanAdjust(current ? await modulesService.hasPermission(current, 'inventory.adjust') : false);
+      setCanEditProducts(current ? await modulesService.hasPermission(current, 'products.edit') : false);
+      setCanDeleteProducts(current ? await modulesService.hasPermission(current, 'products.delete') : false);
     } catch (err) {
       console.error('Failed to fetch stock data:', err);
       showToast('Could not load stock data right now.', 'error');

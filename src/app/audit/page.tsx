@@ -9,6 +9,10 @@ import {
   Search,
   ShieldCheck,
   UserRound,
+  Eye,
+  X,
+  AlertTriangle,
+  Info,
 } from "lucide-react";
 import { modulesService } from "@/lib/services/modules";
 import { useUi } from "@/components/ui/AppProviders";
@@ -118,20 +122,24 @@ export default function AuditPage() {
   const [query, setQuery] = React.useState("");
   const [moduleFilter, setModuleFilter] = React.useState<ActivityModule>("all");
   const [dateFilter, setDateFilter] = React.useState<"all" | "7" | "30" | "90">("30");
+  const [selectedRow, setSelectedRow] = React.useState<ActivityRow | null>(null);
 
   React.useEffect(() => {
     async function load() {
       setIsLoading(true);
       try {
-        const [auditTrail, movements] = await Promise.all([
+        const [auditTrail, movements, challanRows, receiptRows, slipRows] = await Promise.all([
           modulesService.getAuditTrail(),
           modulesService.getMovements(),
+          modulesService.getChallans(),
+          modulesService.getDeliveryReceipts(),
+          modulesService.getPaymentSlips(),
         ]);
         setAuditRows(auditTrail);
         setMovementRows(movements);
-        setChallans(modulesService.getChallans());
-        setReceipts(modulesService.getDeliveryReceipts());
-        setSlips(modulesService.getPaymentSlips());
+        setChallans(challanRows);
+        setReceipts(receiptRows);
+        setSlips(slipRows);
       } catch (error) {
         console.error("Failed to load audit data:", error);
         showToast("Could not load audit activity right now.", "error");
@@ -154,9 +162,9 @@ export default function AuditPage() {
       created_at: row.created_at,
       action: row.action,
       entity_type: row.entity_type,
-      entity_name: row.entity_name,
-      reason: row.reason,
-      performed_by: row.performed_by,
+      entity_name: row.entity_name || row.entity_id || "-",
+      reason: row.reason || "-",
+      performed_by: row.performed_by || "-",
       details: row.details || "-",
       source: "audit" as const,
     }));
@@ -369,6 +377,7 @@ export default function AuditPage() {
                   <th>Entity</th>
                   <th>Reason</th>
                   <th>Performed By</th>
+                  <th></th>
                 </tr>
               </thead>
               <tbody>
@@ -381,7 +390,14 @@ export default function AuditPage() {
                     <tr key={row.id}>
                       <td>{formatDateTime(row.created_at)}</td>
                       <td>
-                        <div className={styles.primaryCell}>{row.action}</div>
+                        <div className={styles.actionCell}>
+                          {row.action.toLowerCase().includes('delete') || row.action.toLowerCase().includes('cancel') ? (
+                            <AlertTriangle size={14} className={styles.warningIcon} />
+                          ) : (
+                            <Info size={14} className={styles.infoIcon} />
+                          )}
+                          <div className={styles.primaryCell}>{row.action}</div>
+                        </div>
                         <div className={styles.secondaryCell}>{row.source === "movement" ? "From movement log" : "From audit log"}</div>
                       </td>
                       <td>
@@ -397,6 +413,11 @@ export default function AuditPage() {
                           <UserRound size={14} />
                           <span>{row.performed_by}</span>
                         </div>
+                      </td>
+                      <td>
+                        <button className={styles.iconButton} onClick={() => setSelectedRow(row)} title="View Details">
+                          <Eye size={16} />
+                        </button>
                       </td>
                     </tr>
                   ))
@@ -466,6 +487,77 @@ export default function AuditPage() {
           </div>
         </div>
       </div>
+
+      {selectedRow && (
+        <div className={styles.overlay} onClick={() => setSelectedRow(null)}>
+          <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.modalHeader}>
+              <h2 className={styles.modalTitle}>Activity Details</h2>
+              <button className={styles.closeButton} onClick={() => setSelectedRow(null)}>
+                <X size={20} />
+              </button>
+            </div>
+            <div className={styles.modalBody}>
+              <div className={styles.detailGrid}>
+                <div className={styles.detailItem}>
+                  <label>Timestamp</label>
+                  <div>{formatDateTime(selectedRow.created_at)}</div>
+                </div>
+                <div className={styles.detailItem}>
+                  <label>Action</label>
+                  <div className={styles.primaryText}>{selectedRow.action}</div>
+                </div>
+                <div className={styles.detailItem}>
+                  <label>Module / Type</label>
+                  <div className={styles.badgeText}>{selectedRow.entity_type}</div>
+                </div>
+                <div className={styles.detailItem}>
+                  <label>Performed By</label>
+                  <div className={styles.primaryText}>{selectedRow.performed_by}</div>
+                </div>
+              </div>
+
+              <div className={styles.detailSection}>
+                <label>Entity Involved</label>
+                <div className={styles.primaryText}>{selectedRow.entity_name}</div>
+              </div>
+
+              <div className={styles.detailSection}>
+                <label>Reason Provided</label>
+                <div className={styles.reasonBox}>{selectedRow.reason}</div>
+              </div>
+
+              <div className={styles.detailSection}>
+                <label>Full Activity Details</label>
+                <div className={styles.detailsBox}>{selectedRow.details}</div>
+              </div>
+
+              {selectedRow.source === 'audit' && (auditRows.find(r => r.id === selectedRow.id) as any)?.old_values && (
+                <div className={styles.detailSection}>
+                  <label>Value Changes</label>
+                  <div className={styles.diffGrid}>
+                    <div className={styles.diffSide}>
+                      <div className={styles.diffLabel}>Previous Values</div>
+                      <pre className={styles.diffPre}>
+                        {JSON.stringify((auditRows.find(r => r.id === selectedRow.id) as any).old_values, null, 2)}
+                      </pre>
+                    </div>
+                    <div className={styles.diffSide}>
+                      <div className={styles.diffLabel}>New Values</div>
+                      <pre className={styles.diffPre}>
+                        {JSON.stringify((auditRows.find(r => r.id === selectedRow.id) as any).new_values, null, 2)}
+                      </pre>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+            <div className={styles.modalActions}>
+              <button className={styles.secondaryAction} onClick={() => setSelectedRow(null)}>Close</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

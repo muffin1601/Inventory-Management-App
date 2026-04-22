@@ -11,7 +11,11 @@ import {
   ShieldCheck,
   UserCog,
   UserPlus,
+  Settings,
   X,
+  Key,
+  Eye,
+  EyeOff,
 } from 'lucide-react';
 import { modulesService } from '@/lib/services/modules';
 import type { PermissionRow, RoleRow, UserAccessRow } from '@/types/modules';
@@ -32,13 +36,6 @@ type RoleFormState = {
   permission_keys: string[];
 };
 
-function makeId(prefix: string) {
-  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
-    return `${prefix}_${crypto.randomUUID()}`;
-  }
-  return `${prefix}_${Math.random().toString(36).slice(2, 11)}`;
-}
-
 function formatDate(value?: string) {
   if (!value) return 'Never';
   const date = new Date(value);
@@ -52,6 +49,18 @@ function normalizeText(value: string) {
 
 function getRoleById(roles: RoleRow[], roleId: string) {
   return roles.find((role) => role.id === roleId) || null;
+}
+
+function getEffectivePermissionCountForUser(user: UserAccessRow, roles: RoleRow[]) {
+  // Super Admin check
+  if (user.role_id === 'r1' || user.role_name === 'Super Admin') {
+    return modulesService.getPermissions().length;
+  }
+  const role = getRoleById(roles, user.role_id);
+  const inherited = role?.permission_keys ?? [];
+  const effective = new Set([...inherited, ...(user.custom_permission_keys || [])]);
+  (user.revoked_permission_keys || []).forEach((key) => effective.delete(key));
+  return effective.size;
 }
 
 function groupPermissions(permissions: PermissionRow[]) {
@@ -75,6 +84,9 @@ export default function UsersPage() {
   const [pageSize, setPageSize] = React.useState(10);
 
   const [createUserOpen, setCreateUserOpen] = React.useState(false);
+  const [showPassword, setShowPassword] = React.useState(false);
+  const [editUserModal, setEditUserModal] = React.useState<UserAccessRow | null>(null);
+  const [passwordModal, setPasswordModal] = React.useState<UserAccessRow | null>(null);
   const [userPermissionEditor, setUserPermissionEditor] = React.useState<UserAccessRow | null>(null);
   const [newRoleOpen, setNewRoleOpen] = React.useState(false);
 
@@ -84,6 +96,18 @@ export default function UsersPage() {
     temporary_password: '',
     role_id: '',
   });
+  
+  const [editForm, setEditForm] = React.useState({
+    full_name: '',
+    email: '',
+    role_id: ''
+  });
+
+  const [passwordForm, setPasswordForm] = React.useState({
+    password: '',
+    confirmPassword: ''
+  });
+
   const [roleForm, setRoleForm] = React.useState<RoleFormState>({ name: '', permission_keys: [] });
 
   const permissions = React.useMemo(() => modulesService.getPermissions(), []);
@@ -102,16 +126,7 @@ export default function UsersPage() {
   }, []);
 
   React.useEffect(() => {
-    const init = async () => {
-      await syncData();
-    };
-    init();
-    window.addEventListener('ims-current-user-changed', syncData);
-    window.addEventListener('ims-users-changed', syncData);
-    return () => {
-      window.removeEventListener('ims-current-user-changed', syncData);
-      window.removeEventListener('ims-users-changed', syncData);
-    };
+    syncData();
   }, [syncData]);
 
   const [canInvite, setCanInvite] = React.useState(false);
@@ -119,18 +134,27 @@ export default function UsersPage() {
   const [canDisableUsers, setCanDisableUsers] = React.useState(false);
   const [canManageRoles, setCanManageRoles] = React.useState(false);
 
-  const selectedRole = React.useMemo(() => roles.find((role) => role.id === selectedRoleId) || null, [roles, selectedRoleId]);
-
   React.useEffect(() => {
     const loadPermissions = async () => {
       const currentUser = await modulesService.getCurrentUser();
-      setCanInvite(currentUser ? modulesService.hasPermission(currentUser, 'users.invite') : false);
-      setCanEditUsers(currentUser ? modulesService.hasPermission(currentUser, 'users.edit') : false);
-      setCanDisableUsers(currentUser ? modulesService.hasPermission(currentUser, 'users.disable') : false);
-      setCanManageRoles(currentUser ? modulesService.hasPermission(currentUser, 'roles.manage') : false);
+      if (!currentUser) return;
+      
+      const [invite, edit, disable, manage] = await Promise.all([
+        modulesService.hasPermission(currentUser, 'users.invite'),
+        modulesService.hasPermission(currentUser, 'users.edit'),
+        modulesService.hasPermission(currentUser, 'users.disable'),
+        modulesService.hasPermission(currentUser, 'roles.manage'),
+      ]);
+      
+      setCanInvite(invite);
+      setCanEditUsers(edit);
+      setCanDisableUsers(disable);
+      setCanManageRoles(manage);
     };
     loadPermissions();
   }, []);
+
+  const selectedRole = React.useMemo(() => roles.find((role) => role.id === selectedRoleId) || null, [roles, selectedRoleId]);
 
   React.useEffect(() => {
     if (selectedRole) {
@@ -179,202 +203,118 @@ export default function UsersPage() {
 
   async function createUser() {
     if (!userForm.full_name.trim() || !userForm.email.trim() || !userForm.temporary_password.trim() || !userForm.role_id) {
-      showToast('Please complete name, email, temporary password, and role.', 'error');
+      showToast('Please complete all fields.', 'error');
       return;
     }
 
-    if (userForm.temporary_password.trim().length < 6) {
-      showToast('Temporary password should be at least 6 characters.', 'error');
-      return;
+    try {
+      await modulesService.createUser({
+        full_name: userForm.full_name.trim(),
+        email: userForm.email.trim().toLowerCase(),
+        temporary_password: userForm.temporary_password.trim(),
+        role_id: userForm.role_id,
+      });
+      await syncData();
+      setCreateUserOpen(false);
+      showToast('User created successfully.', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to create user.', 'error');
     }
-
-    const email = userForm.email.trim().toLowerCase();
-    if (users.some((user) => user.email.toLowerCase() === email)) {
-      showToast('A user with this email already exists.', 'error');
-      return;
-    }
-
-    const role = getRoleById(roles, userForm.role_id);
-    if (!role) return;
-
-    const newUser: UserAccessRow = {
-      id: makeId('user'),
-      full_name: userForm.full_name.trim(),
-      email,
-      role_id: role.id,
-      role_name: role.name,
-      status: 'ACTIVE',
-      custom_permission_keys: [],
-      revoked_permission_keys: [],
-      temporary_password: userForm.temporary_password.trim(),
-      last_active_at: '',
-    };
-
-    const currentUser = await modulesService.getCurrentUser();
-    modulesService.saveUser(newUser);
-    await modulesService.addAudit({
-      action: 'User Created',
-      entity_type: 'user',
-      entity_id: newUser.id,
-      entity_name: newUser.full_name,
-      reason: `Created with role ${role.name}`,
-      performed_by: currentUser?.email || 'Unknown',
-      details: newUser.email,
-    });
-    syncData();
-    setCreateUserOpen(false);
-    setUserForm({
-      full_name: '',
-      email: '',
-      temporary_password: '',
-      role_id: roles.find((item) => item.name === 'Viewer')?.id || roles[0]?.id || '',
-    });
-    showToast('User created successfully.', 'success');
   }
 
-  async function updateUserRole(userId: string, roleId: string) {
-    const role = getRoleById(roles, roleId);
-    const user = users.find((item) => item.id === userId);
-    if (!role || !user) return;
+  async function handleEditUser() {
+    if (!editUserModal) return;
+    if (!editForm.full_name.trim() || !editForm.email.trim()) {
+      showToast('Name and Email are required.', 'error');
+      return;
+    }
 
-    const nextUser: UserAccessRow = {
-      ...user,
-      role_id: role.id,
-      role_name: role.name,
-    };
-    const currentUser = await modulesService.getCurrentUser();
-    modulesService.saveUser(nextUser);
-    await modulesService.addAudit({
-      action: 'User Role Changed',
-      entity_type: 'user',
-      entity_id: user.id,
-      entity_name: user.full_name,
-      reason: `Role changed to ${role.name}`,
-      performed_by: currentUser?.email || 'Unknown',
-      details: `${user.role_name} -> ${role.name}`,
-    });
-    syncData();
-    showToast('User role updated.', 'success');
+    try {
+      await modulesService.updateUserDetails(editUserModal.id, editForm);
+      await syncData();
+      setEditUserModal(null);
+      showToast('User details updated.', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to update user.', 'error');
+    }
+  }
+
+  async function handleChangePassword() {
+    if (!passwordModal) return;
+    if (passwordForm.password.length < 6) {
+      showToast('Password must be at least 6 characters.', 'error');
+      return;
+    }
+    if (passwordForm.password !== passwordForm.confirmPassword) {
+      showToast('Passwords do not match.', 'error');
+      return;
+    }
+
+    try {
+      await modulesService.changeUserPassword(passwordModal.id, passwordForm.password);
+      showToast('Password changed successfully.', 'success');
+      setPasswordModal(null);
+      setPasswordForm({ password: '', confirmPassword: '' });
+    } catch (error: any) {
+      showToast(error.message || 'Failed to change password.', 'error');
+    }
   }
 
   async function toggleUserStatus(userId: string) {
     const user = users.find((item) => item.id === userId);
     if (!user) return;
-
-    const nextStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
-    const actionText = nextStatus === 'DISABLED' ? 'disable' : 'enable';
     
-    // Special handling for admin users
-    if (user.email === 'admin@nexusims.com' && nextStatus === 'DISABLED') {
-      showToast('Admin user cannot be disabled.', 'error');
+    // Prevent disabling Super Admin
+    if (user.role_id === 'r1' && user.status === 'ACTIVE') {
+      showToast('Super Admin cannot be disabled.', 'error');
       return;
     }
 
-    const confirmed = await confirmAction({
-      title: `Confirm ${actionText} user`,
-      message: `Are you sure you want to ${actionText} ${user.full_name}? ${nextStatus === 'DISABLED' ? 'They will lose access to the system.' : 'They will regain access to the system.'}`,
-      confirmText: actionText.charAt(0).toUpperCase() + actionText.slice(1),
-      cancelText: 'Cancel',
-      requireReason: true,
-      reasonLabel: 'Reason for status change',
-      reasonPlaceholder: `Why are you ${actionText === 'disable' ? 'disabling' : 'enabling'} this user?`,
-    });
-
-    if (!confirmed.confirmed) return;
-
-    const nextUser: UserAccessRow = {
-      ...user,
-      status: nextStatus,
-    };
-    const currentUser = await modulesService.getCurrentUser();
-    const allUsers = await modulesService.getUsers();
-    modulesService.saveUser(nextUser);
-    if (currentUser?.id === userId && nextStatus === 'DISABLED') {
-      const firstActiveOtherUser = allUsers.find((item) => item.id !== userId && item.status === 'ACTIVE');
-      if (firstActiveOtherUser) {
-        modulesService.setCurrentUser(firstActiveOtherUser.id);
-      }
+    const nextStatus = user.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE';
+    try {
+      await modulesService.saveUser({ ...user, status: nextStatus });
+      await syncData();
+      showToast(`User ${nextStatus === 'ACTIVE' ? 'enabled' : 'disabled'}.`, 'success');
+    } catch (error) {
+      showToast('Failed to change status.', 'error');
     }
-    await modulesService.addAudit({
-      action: 'User Status Changed',
-      entity_type: 'user',
-      entity_id: user.id,
-      entity_name: user.full_name,
-      reason: confirmed.reason,
-      performed_by: currentUser?.email || 'Unknown',
-      details: user.email,
-    });
-    syncData();
-    showToast('User status updated.', 'success');
-  }
-
-  function toggleRoleFormPermission(permissionKey: string) {
-    setRoleForm((current) => ({
-      ...current,
-      permission_keys: current.permission_keys.includes(permissionKey)
-        ? current.permission_keys.filter((item) => item !== permissionKey)
-        : [...current.permission_keys, permissionKey],
-    }));
   }
 
   async function saveRoleChanges() {
     if (!selectedRole) return;
-    if (!roleForm.name.trim()) {
-      showToast('Role name is required.', 'error');
-      return;
+    try {
+      await modulesService.updateRole({
+        roleId: selectedRole.id,
+        name: roleForm.name,
+        permission_keys: roleForm.permission_keys,
+      });
+      await syncData();
+      showToast('Role permissions updated.', 'success');
+    } catch (error) {
+      showToast('Failed to update role.', 'error');
     }
-
-    const currentUser = await modulesService.getCurrentUser();
-    modulesService.updateRole({
-      roleId: selectedRole.id,
-      name: roleForm.name.trim(),
-      permission_keys: roleForm.permission_keys,
-    });
-    await modulesService.addAudit({
-      action: 'Role Updated',
-      entity_type: 'user',
-      entity_id: selectedRole.id,
-      entity_name: roleForm.name.trim(),
-      reason: 'Role permissions updated',
-      performed_by: currentUser?.email || 'Unknown',
-      details: `${roleForm.permission_keys.length} permissions saved`,
-    });
-    syncData();
-    showToast('Role permissions saved.', 'success');
   }
 
   async function createRole() {
-    if (!roleForm.name.trim()) {
-      showToast('Role name is required.', 'error');
-      return;
+    if (!roleForm.name.trim()) return;
+    try {
+      await modulesService.createRole({
+        name: roleForm.name,
+        permission_keys: roleForm.permission_keys,
+      });
+      await syncData();
+      setNewRoleOpen(false);
+      showToast('New role created.', 'success');
+    } catch (error) {
+      showToast('Failed to create role.', 'error');
     }
-
-    if (roles.some((role) => role.name.toLowerCase() === roleForm.name.trim().toLowerCase())) {
-      showToast('A role with this name already exists.', 'error');
-      return;
-    }
-
-    const currentUser = await modulesService.getCurrentUser();
-    const newRole = await modulesService.createRole({
-      name: roleForm.name.trim(),
-      permission_keys: roleForm.permission_keys,
-    });
-    await modulesService.addAudit({
-      action: 'Role Created',
-      entity_type: 'user',
-      entity_id: newRole.id,
-      entity_name: newRole.name,
-      reason: 'New role created',
-      performed_by: currentUser?.email || 'Unknown',
-      details: `${newRole.permission_keys.length} permissions assigned`,
-    });
-    syncData();
-    setSelectedRoleId(newRole.id);
-    setNewRoleOpen(false);
-    showToast('Role created successfully.', 'success');
   }
 
   function getUserPermissionState(user: UserAccessRow, permissionKey: string) {
+    // Super Admin check
+    if (user.role_id === 'r1' || user.role_name === 'Super Admin') {
+      return { inherited: true, granted: false, revoked: false, effective: true };
+    }
     const role = getRoleById(roles, user.role_id);
     const inherited = role?.permission_keys.includes(permissionKey) || false;
     const granted = user.custom_permission_keys.includes(permissionKey);
@@ -384,43 +324,34 @@ export default function UsersPage() {
   }
 
   async function toggleUserPermission(user: UserAccessRow, permissionKey: string) {
-    const permissionState = getUserPermissionState(user, permissionKey);
+    const state = getUserPermissionState(user, permissionKey);
     let nextCustom = [...user.custom_permission_keys];
     let nextRevoked = [...(user.revoked_permission_keys || [])];
 
-    if (permissionState.inherited) {
-      if (permissionState.revoked) {
-        nextRevoked = nextRevoked.filter((item) => item !== permissionKey);
+    if (state.inherited) {
+      if (state.revoked) {
+        nextRevoked = nextRevoked.filter(k => k !== permissionKey);
       } else {
-        nextRevoked = Array.from(new Set([...nextRevoked, permissionKey]));
-        nextCustom = nextCustom.filter((item) => item !== permissionKey);
+        nextRevoked.push(permissionKey);
+        nextCustom = nextCustom.filter(k => k !== permissionKey);
       }
-    } else if (permissionState.granted) {
-      nextCustom = nextCustom.filter((item) => item !== permissionKey);
     } else {
-      nextCustom = Array.from(new Set([...nextCustom, permissionKey]));
-      nextRevoked = nextRevoked.filter((item) => item !== permissionKey);
+      if (state.granted) {
+        nextCustom = nextCustom.filter(k => k !== permissionKey);
+      } else {
+        nextCustom.push(permissionKey);
+      }
     }
 
-    const nextUser: UserAccessRow = {
-      ...user,
-      custom_permission_keys: nextCustom,
-      revoked_permission_keys: nextRevoked,
-    };
-
-    const currentUser = await modulesService.getCurrentUser();
-    modulesService.saveUser(nextUser);
-    await modulesService.addAudit({
-      action: 'User Permission Updated',
-      entity_type: 'user',
-      entity_id: user.id,
-      entity_name: user.full_name,
-      reason: `Permission ${permissionKey} changed`,
-      performed_by: currentUser?.email || 'Unknown',
-      details: `Custom grants: ${nextCustom.length} | Revoked: ${nextRevoked.length}`,
-    });
-    syncData();
-    setUserPermissionEditor(nextUser);
+    try {
+      const nextUser = { ...user, custom_permission_keys: nextCustom, revoked_permission_keys: nextRevoked };
+      await modulesService.saveUser(nextUser);
+      await syncData();
+      setUserPermissionEditor(nextUser);
+      showToast('User permission updated.', 'success');
+    } catch (error) {
+      showToast('Failed to update permission.', 'error');
+    }
   }
 
   return (
@@ -428,54 +359,41 @@ export default function UsersPage() {
       <div className={styles.header}>
         <div>
           <h1 className={styles.title}>User Management</h1>
-          <p className={styles.subtitle}>Create users, assign roles, and control access clearly for non-technical admins.</p>
+          <p className={styles.subtitle}>Control access, manage roles, and customize permissions for your organization.</p>
         </div>
-        {canInvite ? (
-          <button type="button" className={styles.primaryAction} onClick={() => setCreateUserOpen(true)}>
-            <UserPlus size={16} />
-            Create User
+        {canInvite && (
+          <button className={styles.primaryAction} onClick={() => setCreateUserOpen(true)}>
+            <UserPlus size={16} /> Create User
           </button>
-        ) : null}
+        )}
       </div>
 
       <div className={styles.statsGrid}>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Total Users</span>
           <strong className={styles.statValue}>{users.length}</strong>
-          <span className={styles.statMeta}>{stats.activeUsers} active right now</span>
+          <span className={styles.statMeta}>{stats.activeUsers} active</span>
         </div>
         <div className={styles.statCard}>
-          <span className={styles.statLabel}>Disabled Users</span>
+          <span className={styles.statLabel}>Disabled</span>
           <strong className={styles.statValue}>{stats.disabledUsers}</strong>
-          <span className={styles.statMeta}>Access is blocked for these accounts</span>
+          <span className={styles.statMeta}>Access blocked</span>
         </div>
         <div className={styles.statCard}>
           <span className={styles.statLabel}>Roles</span>
           <strong className={styles.statValue}>{stats.roles}</strong>
-          <span className={styles.statMeta}>Reusable permission templates</span>
+          <span className={styles.statMeta}>Permission sets</span>
         </div>
         <div className={styles.statCard}>
-          <span className={styles.statLabel}>Custom Overrides</span>
+          <span className={styles.statLabel}>Overrides</span>
           <strong className={styles.statValue}>{stats.customOverrides}</strong>
-          <span className={styles.statMeta}>Users with permission exceptions</span>
+          <span className={styles.statMeta}>Individual access</span>
         </div>
       </div>
 
       <div className={styles.tabs}>
-        <button
-          type="button"
-          className={`${styles.tab} ${activeTab === 'users' ? styles.activeTab : ''}`}
-          onClick={() => setActiveTab('users')}
-        >
-          People & Access
-        </button>
-        <button
-          type="button"
-          className={`${styles.tab} ${activeTab === 'roles' ? styles.activeTab : ''}`}
-          onClick={() => setActiveTab('roles')}
-        >
-          Roles & Permissions
-        </button>
+        <button className={`${styles.tab} ${activeTab === 'users' ? styles.activeTab : ''}`} onClick={() => setActiveTab('users')}>People & Access</button>
+        <button className={`${styles.tab} ${activeTab === 'roles' ? styles.activeTab : ''}`} onClick={() => setActiveTab('roles')}>Roles & Permissions</button>
       </div>
 
       {activeTab === 'users' ? (
@@ -483,29 +401,12 @@ export default function UsersPage() {
           <div className={styles.toolbar}>
             <div className={styles.searchBox}>
               <Search size={18} className={styles.searchIcon} />
-              <input
-                type="text"
-                className={styles.searchInput}
-                placeholder="Search user, email, or role..."
-                value={search}
-                onChange={(event) => setSearch(event.target.value)}
-              />
+              <input type="text" className={styles.searchInput} placeholder="Search user..." value={search} onChange={e => setSearch(e.target.value)} />
             </div>
             <div className={styles.filterGroup}>
-              <select className={styles.select} value={roleFilter} onChange={(event) => setRoleFilter(event.target.value)}>
+              <select className={styles.select} value={roleFilter} onChange={e => setRoleFilter(e.target.value)}>
                 <option value="ALL">All Roles</option>
-                {roles.map((role) => (
-                  <option key={role.id} value={role.id}>{role.name}</option>
-                ))}
-              </select>
-              <select
-                className={styles.select}
-                value={statusFilter}
-                onChange={(event) => setStatusFilter(event.target.value as 'ALL' | UserAccessRow['status'])}
-              >
-                <option value="ALL">All Status</option>
-                <option value="ACTIVE">Active</option>
-                <option value="DISABLED">Disabled</option>
+                {roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}
               </select>
             </div>
           </div>
@@ -514,7 +415,6 @@ export default function UsersPage() {
             <thead>
               <tr>
                 <th>User</th>
-                <th>Email</th>
                 <th>Role</th>
                 <th>Permissions</th>
                 <th>Status</th>
@@ -523,157 +423,88 @@ export default function UsersPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredUsers.length === 0 ? (
-                <tr>
-                  <td colSpan={7} className={styles.emptyCell}>No users match the current search.</td>
-                </tr>
-              ) : (
-                paginatedUsers.map((user) => (
-                  <tr key={user.id}>
-                    <td>
-                      <div className={styles.userCell}>
-                        <div className={styles.avatar}>{user.full_name.charAt(0).toUpperCase()}</div>
-                        <div>
-                          <div className={styles.userName}>{user.full_name}</div>
-                          <div className={styles.userMeta}>
-                            {(user.custom_permission_keys.length > 0 || (user.revoked_permission_keys || []).length > 0) ? 'Has custom overrides' : 'Role-only access'}
-                          </div>
-                        </div>
+              {paginatedUsers.map(user => (
+                <tr key={user.id}>
+                  <td>
+                    <div className={styles.userCell}>
+                      <div className={styles.avatar}>{user.full_name.charAt(0)}</div>
+                      <div>
+                        <div className={styles.userName}>{user.full_name}</div>
+                        <div className={styles.userMeta}>{user.email}</div>
                       </div>
-                    </td>
-                    <td>{user.email}</td>
-                    <td>
-                      {canEditUsers ? (
-                        <select
-                          className={styles.inlineSelect}
-                          value={user.role_id}
-                          onChange={(event) => updateUserRole(user.id, event.target.value)}
-                        >
-                          {roles.map((role) => (
-                            <option key={role.id} value={role.id}>{role.name}</option>
-                          ))}
-                        </select>
-                      ) : (
-                        <span className={styles.roleBadge}>{user.role_name}</span>
+                    </div>
+                  </td>
+                  <td><span className={styles.roleBadge}>{user.role_name}</span></td>
+                  <td>
+                    <div className={styles.permissionCount}>{getEffectivePermissionCountForUser(user, roles)}</div>
+                    <div className={styles.userMeta}>{user.custom_permission_keys.length} custom</div>
+                  </td>
+                  <td><span className={user.status === 'ACTIVE' ? styles.statusActive : styles.statusDisabled}>{user.status}</span></td>
+                  <td>{formatDate(user.last_active_at)}</td>
+                  <td>
+                    <div className={styles.actionGroup}>
+                      {canEditUsers && (
+                        <>
+                          <button className={styles.iconAction} title="Edit User" onClick={() => { setEditUserModal(user); setEditForm({ full_name: user.full_name, email: user.email, role_id: user.role_id }); }}><Settings size={15} /></button>
+                          <button className={styles.iconAction} title="Permissions" onClick={() => setUserPermissionEditor(user)}><ShieldCheck size={15} /></button>
+                          <button className={styles.iconAction} title="Password" onClick={() => setPasswordModal(user)}><Key size={15} /></button>
+                        </>
                       )}
-                    </td>
-                    <td>
-                      <div className={styles.permissionCount}>{modulesService.getPermissionCountForUser(user)} permissions</div>
-                      <div className={styles.userMeta}>
-                        +{user.custom_permission_keys.length} custom / -{(user.revoked_permission_keys || []).length} removed
-                      </div>
-                    </td>
-                    <td>
-                      <span className={user.status === 'ACTIVE' ? styles.statusActive : styles.statusDisabled}>{user.status}</span>
-                    </td>
-                    <td>{formatDate(user.last_active_at)}</td>
-                    <td>
-                      <div className={styles.actionGroup}>
-                        {canEditUsers ? (
-                          <button type="button" className={styles.iconAction} title="Edit permissions" onClick={() => setUserPermissionEditor(user)}>
-                            <ShieldCheck size={15} />
-                          </button>
-                        ) : null}
-                        {canDisableUsers ? (
-                          <button type="button" className={styles.iconAction} title="Enable or disable" onClick={() => toggleUserStatus(user.id)}>
-                            {user.status === 'ACTIVE' ? <Lock size={15} /> : <Check size={15} />}
-                          </button>
-                        ) : null}
-                      </div>
-                    </td>
-                  </tr>
-                ))
-              )}
+                      {canDisableUsers && (
+                        <button className={styles.iconAction} onClick={() => toggleUserStatus(user.id)}>
+                          {user.status === 'ACTIVE' ? <Lock size={15} /> : <Check size={15} />}
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              ))}
             </tbody>
           </table>
 
-          <TablePagination
-            page={page}
-            pageSize={pageSize}
-            totalItems={filteredUsers.length}
-            onPageChange={setPage}
-            onPageSizeChange={setPageSize}
-            pageSizeOptions={PAGE_SIZE_OPTIONS}
-            itemLabel="users"
-          />
+          <TablePagination page={page} pageSize={pageSize} totalItems={filteredUsers.length} onPageChange={setPage} onPageSizeChange={setPageSize} pageSizeOptions={PAGE_SIZE_OPTIONS} itemLabel="users" />
         </div>
       ) : (
         <div className={styles.rolesLayout}>
           <div className={styles.rolesSidebar}>
             <div className={styles.sidebarHeader}>
-              <div>
-                <h2 className={styles.sidebarTitle}>Roles</h2>
-                <p className={styles.sidebarSubtitle}>Reusable permission sets for teams.</p>
-              </div>
-              {canManageRoles ? (
-                <button type="button" className={styles.secondaryAction} onClick={() => {
-                  setRoleForm({ name: '', permission_keys: [] });
-                  setNewRoleOpen(true);
-                }}>
-                  <Plus size={15} />
-                  New Role
-                </button>
-              ) : null}
+              <h2 className={styles.sidebarTitle}>Roles</h2>
+              {canManageRoles && <button className={styles.secondaryAction} onClick={() => { setRoleForm({ name: '', permission_keys: [] }); setNewRoleOpen(true); }}><Plus size={14} /></button>}
             </div>
             <div className={styles.roleList}>
-              {roles.map((role) => (
-                <button
-                  type="button"
-                  key={role.id}
-                  className={`${styles.roleCard} ${selectedRoleId === role.id ? styles.roleCardActive : ''}`}
-                  onClick={() => setSelectedRoleId(role.id)}
-                >
-                  <div className={styles.roleCardTitle}>{role.name}</div>
-                  <div className={styles.roleCardMeta}>{role.permission_keys.length} permissions</div>
+              {roles.map(r => (
+                <button key={r.id} className={`${styles.roleCard} ${selectedRoleId === r.id ? styles.roleCardActive : ''}`} onClick={() => setSelectedRoleId(r.id)}>
+                  <div className={styles.roleCardTitle}>{r.name}</div>
+                  <div className={styles.roleCardMeta}>{r.permission_keys.length} permissions</div>
                 </button>
               ))}
             </div>
           </div>
-
           <div className={styles.permissionsPanel}>
-            {selectedRole ? (
+            {selectedRole && (
               <>
                 <div className={styles.panelHeader}>
-                  <div>
-                    <h2 className={styles.panelTitle}>{selectedRole.name}</h2>
-                    <p className={styles.panelSubtitle}>Choose what this role can open and do across the system.</p>
-                  </div>
-                  {canManageRoles ? (
-                    <button type="button" className={styles.primaryAction} onClick={saveRoleChanges}>
-                      Save Role Permissions
-                    </button>
-                  ) : null}
+                  <h2 className={styles.panelTitle}>{selectedRole.name}</h2>
+                  {canManageRoles && <button className={styles.primaryAction} onClick={saveRoleChanges}>Save Changes</button>}
                 </div>
-
                 <div className={styles.roleNameBox}>
-                  <label className={styles.fieldLabel}>Role Name</label>
-                  <input
-                    className={styles.textInput}
-                    value={roleForm.name}
-                    onChange={(event) => setRoleForm((current) => ({ ...current, name: event.target.value }))}
-                    disabled={!canManageRoles}
-                  />
+                   <label className={styles.fieldLabel}>Role Name</label>
+                   <input className={styles.textInput} value={roleForm.name} onChange={e => setRoleForm({ ...roleForm, name: e.target.value })} disabled={!canManageRoles || selectedRole.id === 'r1'} />
                 </div>
-
                 <div className={styles.permissionGrid}>
-                  {Object.entries(permissionGroups).map(([moduleName, groupPermissions]) => (
-                    <div key={moduleName} className={styles.permissionCard}>
-                      <div className={styles.permissionCardTitle}>{moduleName}</div>
+                  {Object.entries(permissionGroups).map(([module, group]) => (
+                    <div key={module} className={styles.permissionCard}>
+                      <div className={styles.permissionCardTitle}>{module}</div>
                       <div className={styles.permissionList}>
-                        {groupPermissions.map((permission) => (
-                          <label key={permission.key} className={styles.permissionItem}>
-                            <input
-                              type="checkbox"
-                              checked={roleForm.permission_keys.includes(permission.key)}
-                              disabled={!canManageRoles}
-                              onChange={() => toggleRoleFormPermission(permission.key)}
-                            />
+                        {group.map(p => (
+                          <label key={p.key} className={styles.permissionItem}>
+                            <input type="checkbox" checked={roleForm.permission_keys.includes(p.key)} onChange={() => {
+                              const keys = roleForm.permission_keys.includes(p.key) ? roleForm.permission_keys.filter(k => k !== p.key) : [...roleForm.permission_keys, p.key];
+                              setRoleForm({ ...roleForm, permission_keys: keys });
+                            }} disabled={!canManageRoles || selectedRole.id === 'r1'} />
                             <div>
-                              <div className={styles.permissionLabel}>
-                                {permission.label}
-                                {permission.admin_only ? <span className={styles.permissionTag}>Admin only</span> : null}
-                              </div>
-                              <div className={styles.permissionHint}>{permission.description}</div>
+                              <div className={styles.permissionLabel}>{p.label}</div>
+                              <div className={styles.permissionHint}>{p.description}</div>
                             </div>
                           </label>
                         ))}
@@ -682,166 +513,99 @@ export default function UsersPage() {
                   ))}
                 </div>
               </>
-            ) : null}
+            )}
           </div>
         </div>
       )}
 
-      {createUserOpen ? (
+      {/* Modals */}
+      {createUserOpen && (
         <div className={styles.overlay} onClick={() => setCreateUserOpen(false)}>
-          <div className={styles.modal} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <h2 className={styles.modalTitle}>Create New User</h2>
-                <p className={styles.modalSubtitle}>Add a team member, assign a default role, and hand over a temporary password.</p>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}><h2 className={styles.modalTitle}>Create User</h2></div>
+            <div className={styles.modalBody}>
+              <div className={styles.formGrid}>
+                <div className={styles.field}><label className={styles.fieldLabel}>Full Name</label><input className={styles.textInput} value={userForm.full_name} onChange={e => setUserForm({...userForm, full_name: e.target.value})} /></div>
+                <div className={styles.field}><label className={styles.fieldLabel}>Email</label><input className={styles.textInput} value={userForm.email} onChange={e => setUserForm({...userForm, email: e.target.value})} /></div>
+                <div className={styles.field}>
+                  <label className={styles.fieldLabel}>Temp Password</label>
+                  <div className={styles.inputWrapper}>
+                    <input className={styles.textInput} type={showPassword ? 'text' : 'password'} value={userForm.temporary_password} onChange={e => setUserForm({...userForm, temporary_password: e.target.value})} />
+                    <button className={styles.inputIcon} onClick={() => setShowPassword(!showPassword)} type="button">
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                  </div>
+                </div>
+                <div className={styles.field}><label className={styles.fieldLabel}>Role</label><select className={styles.select} value={userForm.role_id} onChange={e => setUserForm({...userForm, role_id: e.target.value})}>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
               </div>
-              <button type="button" className={styles.closeBtn} onClick={() => setCreateUserOpen(false)}>
-                <X size={16} />
-              </button>
             </div>
+            <div className={styles.modalActions}><button className={styles.secondaryAction} onClick={() => setCreateUserOpen(false)}>Cancel</button><button className={styles.primaryAction} onClick={createUser}>Create</button></div>
+          </div>
+        </div>
+      )}
+
+      {editUserModal && (
+        <div className={styles.overlay} onClick={() => setEditUserModal(null)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}><h2 className={styles.modalTitle}>Edit User</h2></div>
+            <div className={styles.modalBody}>
+              <div className={styles.formGrid}>
+                <div className={styles.field}><label className={styles.fieldLabel}>Full Name</label><input className={styles.textInput} value={editForm.full_name} onChange={e => setEditForm({...editForm, full_name: e.target.value})} /></div>
+                <div className={styles.field}><label className={styles.fieldLabel}>Email</label><input className={styles.textInput} value={editForm.email} onChange={e => setEditForm({...editForm, email: e.target.value})} /></div>
+                <div className={styles.field}><label className={styles.fieldLabel}>Role</label><select className={styles.select} value={editForm.role_id} onChange={e => setEditForm({...editForm, role_id: e.target.value})} disabled={editUserModal.id === 'r1'}>{roles.map(r => <option key={r.id} value={r.id}>{r.name}</option>)}</select></div>
+              </div>
+            </div>
+            <div className={styles.modalActions}><button className={styles.secondaryAction} onClick={() => setEditUserModal(null)}>Cancel</button><button className={styles.primaryAction} onClick={handleEditUser}>Save</button></div>
+          </div>
+        </div>
+      )}
+
+      {passwordModal && (
+        <div className={styles.overlay} onClick={() => setPasswordModal(null)}>
+          <div className={styles.modal} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}><h2 className={styles.modalTitle}>Change Password: {passwordModal.full_name}</h2></div>
             <div className={styles.modalBody}>
               <div className={styles.formGrid}>
                 <div className={styles.field}>
-                  <label className={styles.fieldLabel}>Full Name</label>
-                  <input className={styles.textInput} value={userForm.full_name} onChange={(event) => setUserForm((current) => ({ ...current, full_name: event.target.value }))} />
-                </div>
-                <div className={styles.field}>
-                  <label className={styles.fieldLabel}>Email</label>
-                  <input className={styles.textInput} value={userForm.email} onChange={(event) => setUserForm((current) => ({ ...current, email: event.target.value }))} />
-                </div>
-                <div className={styles.field}>
-                  <label className={styles.fieldLabel}>Temporary Password</label>
-                  <input className={styles.textInput} type="password" value={userForm.temporary_password} onChange={(event) => setUserForm((current) => ({ ...current, temporary_password: event.target.value }))} />
-                </div>
-                <div className={styles.field}>
-                  <label className={styles.fieldLabel}>Role</label>
-                  <select className={styles.select} value={userForm.role_id} onChange={(event) => setUserForm((current) => ({ ...current, role_id: event.target.value }))}>
-                    {roles.map((role) => (
-                      <option key={role.id} value={role.id}>{role.name}</option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-            </div>
-            <div className={styles.modalActions}>
-              <button type="button" className={styles.secondaryAction} onClick={() => setCreateUserOpen(false)}>Cancel</button>
-              <button type="button" className={styles.primaryAction} onClick={createUser}>
-                <UserPlus size={15} />
-                Create User
-              </button>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {newRoleOpen ? (
-        <div className={styles.overlay} onClick={() => setNewRoleOpen(false)}>
-          <div className={styles.modalWide} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <h2 className={styles.modalTitle}>Create New Role</h2>
-                <p className={styles.modalSubtitle}>Start with a name, then choose which permissions belong to this role template.</p>
-              </div>
-              <button type="button" className={styles.closeBtn} onClick={() => setNewRoleOpen(false)}>
-                <X size={16} />
-              </button>
-            </div>
-            <div className={styles.modalBody}>
-              <div className={styles.roleNameBox}>
-                <label className={styles.fieldLabel}>Role Name</label>
-                <input className={styles.textInput} value={roleForm.name} onChange={(event) => setRoleForm((current) => ({ ...current, name: event.target.value }))} />
-              </div>
-              <div className={styles.permissionGrid}>
-                {Object.entries(permissionGroups).map(([moduleName, groupPermissions]) => (
-                  <div key={moduleName} className={styles.permissionCard}>
-                    <div className={styles.permissionCardTitle}>{moduleName}</div>
-                    <div className={styles.permissionList}>
-                      {groupPermissions.map((permission) => (
-                        <label key={permission.key} className={styles.permissionItem}>
-                          <input
-                            type="checkbox"
-                            checked={roleForm.permission_keys.includes(permission.key)}
-                            onChange={() => toggleRoleFormPermission(permission.key)}
-                          />
-                          <div>
-                            <div className={styles.permissionLabel}>
-                              {permission.label}
-                              {permission.admin_only ? <span className={styles.permissionTag}>Admin only</span> : null}
-                            </div>
-                            <div className={styles.permissionHint}>{permission.description}</div>
-                          </div>
-                        </label>
-                      ))}
-                    </div>
+                  <label className={styles.fieldLabel}>New Password</label>
+                  <div className={styles.inputWrapper}>
+                    <input className={styles.textInput} type={showPassword ? 'text' : 'password'} value={passwordForm.password} onChange={e => setPasswordForm({...passwordForm, password: e.target.value})} />
+                    <button className={styles.inputIcon} onClick={() => setShowPassword(!showPassword)} type="button">
+                      {showPassword ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
                   </div>
-                ))}
+                </div>
+                <div className={styles.field}>
+                  <label className={styles.fieldLabel}>Confirm Password</label>
+                  <div className={styles.inputWrapper}>
+                    <input className={styles.textInput} type={showPassword ? 'text' : 'password'} value={passwordForm.confirmPassword} onChange={e => setPasswordForm({...passwordForm, confirmPassword: e.target.value})} />
+                  </div>
+                </div>
               </div>
             </div>
-            <div className={styles.modalActions}>
-              <button type="button" className={styles.secondaryAction} onClick={() => setNewRoleOpen(false)}>Cancel</button>
-              <button type="button" className={styles.primaryAction} onClick={createRole}>
-                <Plus size={15} />
-                Create Role
-              </button>
-            </div>
+            <div className={styles.modalActions}><button className={styles.secondaryAction} onClick={() => setPasswordModal(null)}>Cancel</button><button className={styles.primaryAction} onClick={handleChangePassword}>Update Password</button></div>
           </div>
         </div>
-      ) : null}
+      )}
 
-      {userPermissionEditor ? (
+      {userPermissionEditor && (
         <div className={styles.overlay} onClick={() => setUserPermissionEditor(null)}>
-          <div className={styles.modalWide} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.modalHeader}>
-              <div>
-                <h2 className={styles.modalTitle}>Permissions: {userPermissionEditor.full_name}</h2>
-                <p className={styles.modalSubtitle}>
-                  Role: {userPermissionEditor.role_name}. Turn permissions on or off for this one user without changing the whole role.
-                </p>
-              </div>
-              <button type="button" className={styles.closeBtn} onClick={() => setUserPermissionEditor(null)}>
-                <X size={16} />
-              </button>
-            </div>
-
-            <div className={styles.permissionSummaryBar}>
-              <div className={styles.summaryPill}>
-                <Shield size={14} />
-                {modulesService.getPermissionCountForUser(userPermissionEditor)} effective permissions
-              </div>
-              <div className={styles.summaryPill}>
-                <UserCog size={14} />
-                {userPermissionEditor.custom_permission_keys.length} custom grants
-              </div>
-              <div className={styles.summaryPill}>
-                <Lock size={14} />
-                {(userPermissionEditor.revoked_permission_keys || []).length} revoked from role
-              </div>
-            </div>
-
+          <div className={styles.modalWide} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}><h2 className={styles.modalTitle}>Permissions: {userPermissionEditor.full_name}</h2><button onClick={() => setUserPermissionEditor(null)}><X size={18} /></button></div>
             <div className={styles.modalBody}>
               <div className={styles.permissionGrid}>
-                {Object.entries(permissionGroups).map(([moduleName, groupPermissions]) => (
-                  <div key={moduleName} className={styles.permissionCard}>
-                    <div className={styles.permissionCardTitle}>{moduleName}</div>
+                {Object.entries(permissionGroups).map(([module, group]) => (
+                  <div key={module} className={styles.permissionCard}>
+                    <div className={styles.permissionCardTitle}>{module}</div>
                     <div className={styles.permissionList}>
-                      {groupPermissions.map((permission) => {
-                        const state = getUserPermissionState(userPermissionEditor, permission.key);
+                      {group.map(p => {
+                        const state = getUserPermissionState(userPermissionEditor, p.key);
                         return (
-                          <label key={permission.key} className={styles.permissionItem}>
-                            <input
-                              type="checkbox"
-                              checked={state.effective}
-                              disabled={!canEditUsers}
-                              onChange={() => toggleUserPermission(userPermissionEditor, permission.key)}
-                            />
+                          <label key={p.key} className={styles.permissionItem}>
+                            <input type="checkbox" checked={state.effective} onChange={() => toggleUserPermission(userPermissionEditor, p.key)} disabled={userPermissionEditor.role_id === 'r1'} />
                             <div>
-                              <div className={styles.permissionLabel}>
-                                {permission.label}
-                                {state.granted ? <span className={styles.permissionTag}>Custom grant</span> : null}
-                                {state.revoked ? <span className={styles.permissionTagMuted}>Revoked</span> : null}
-                                {state.inherited && !state.revoked && !state.granted ? <span className={styles.permissionTagNeutral}>From role</span> : null}
-                              </div>
-                              <div className={styles.permissionHint}>{permission.description}</div>
+                              <div className={styles.permissionLabel}>{p.label} {state.granted && <span className={styles.permissionTag}>Custom</span>} {state.revoked && <span className={styles.permissionTagMuted}>Revoked</span>}</div>
+                              <div className={styles.permissionHint}>{p.description}</div>
                             </div>
                           </label>
                         );
@@ -851,13 +615,9 @@ export default function UsersPage() {
                 ))}
               </div>
             </div>
-
-            <div className={styles.modalActions}>
-              <button type="button" className={styles.secondaryAction} onClick={() => setUserPermissionEditor(null)}>Close</button>
-            </div>
           </div>
         </div>
-      ) : null}
+      )}
     </div>
   );
 }

@@ -7,9 +7,31 @@ import type {
   RoleRow,
   AuditTrailRow,
   PermissionRow,
+  OrderRow,
+  ChallanRow,
+  DeliveryReceiptRow,
+  PaymentSlipRow,
+  InventorySnapshotRow,
+  StockMovementRow,
 } from '@/types/modules';
 
-// Permission definitions (same as before)
+// Helper to determine if an error is due to a missing table or column
+function isSchemaError(error: any): boolean {
+  if (!error) return false;
+  const code = error.code;
+  const message = (error.message || '').toLowerCase();
+  return (
+    code === 'PGRST204' || // Table not found
+    code === 'PGRST205' || // Schema not found
+    code === '42P01' ||    // Undefined table
+    code === '42703' ||    // Undefined column
+    message.includes('not found') ||
+    message.includes('does not exist') ||
+    message.includes('relation')
+  );
+}
+
+// Permission definitions
 const PERMISSIONS: PermissionRow[] = [
   { id: 'p1', key: 'dashboard.view', label: 'View Dashboard', module: 'Dashboard', description: 'Open the live dashboard and business summary.' },
   { id: 'p2', key: 'products.view', label: 'View Item Catalog', module: 'Catalog', description: 'Open item catalog and see product details.' },
@@ -78,8 +100,51 @@ const ROUTE_PERMISSION_MAP: Array<{ pattern: RegExp; permission: string }> = [
   { pattern: /^\/users$/, permission: 'users.view' },
 ];
 
+const FALLBACK_ROLES: RoleRow[] = [
+  { id: 'r1', name: 'Super Admin', permission_keys: PERMISSIONS.map(p => p.key) },
+  { id: 'r2', name: 'Admin', permission_keys: PERMISSIONS.filter(p => !p.admin_only).map(p => p.key) },
+  { id: 'r3', name: 'Purchase Manager', permission_keys: ['dashboard.view', 'products.view', 'projects.view', 'vendors.view', 'orders.view'] },
+  { id: 'r4', name: 'Store Manager', permission_keys: ['dashboard.view', 'products.view', 'stock.view', 'inventory.view', 'challans.view'] },
+  { id: 'r5', name: 'Accounts', permission_keys: ['dashboard.view', 'payments.view', 'reports.view'] },
+  { id: 'r6', name: 'Viewer', permission_keys: ['dashboard.view', 'products.view', 'projects.view'] },
+];
+
+function resolveRoleName(roleId: string, roleFromQuery?: any): string {
+  if (roleFromQuery?.name) return roleFromQuery.name;
+  const fallback = FALLBACK_ROLES.find(r => r.id === roleId);
+  if (fallback) return fallback.name;
+  if (roleId === 'r1') return 'Super Admin';
+  if (roleId === 'r2') return 'Admin';
+  return 'Unknown';
+}
+
 // Database-based modules service
 export const modulesService = {
+  _roles: [] as RoleRow[],
+  _initialized: false,
+
+  async refreshRoles() {
+    try {
+      const { data, error } = await supabase.from('roles').select('*');
+      if (data && data.length > 0) {
+        this._roles = data.map(r => ({
+          id: r.id,
+          name: r.name,
+          permission_keys: r.permission_keys || []
+        }));
+        this._initialized = true;
+      } else {
+        // Seed initial roles if none exist
+        console.log('Roles table empty, seeding initial roles...');
+        await supabase.from('roles').insert(FALLBACK_ROLES);
+        this._roles = FALLBACK_ROLES;
+        this._initialized = true;
+      }
+    } catch (e) {
+      console.error('Error refreshing roles:', e);
+    }
+  },
+
   // Authentication methods
   async signIn(email: string, password: string) {
     const { data, error } = await supabase.auth.signInWithPassword({
@@ -99,8 +164,8 @@ export const modulesService = {
         .update({ last_active_at: new Date().toISOString() })
         .eq('id', data.user.id);
 
-      // Get user profile
-      const { data: profile, error: profileError } = await supabase
+      // Get user profile - use limit(1) to avoid PGRST116
+      const { data: profiles, error: profileError } = await supabase
         .from('user_profiles')
         .select(`
           *,
@@ -111,12 +176,14 @@ export const modulesService = {
           )
         `)
         .eq('id', data.user.id)
-        .single();
+        .limit(1);
 
-      if (profileError || !profile) {
-        console.error('Profile fetch error:', profileError);
+      if (profileError || !profiles || profiles.length === 0) {
+        console.error('Profile fetch error:', profileError || 'Profile not found');
         return null;
       }
+
+      const profile = profiles[0];
 
       // Check if user is active
       if (profile.status !== 'ACTIVE') {
@@ -129,7 +196,7 @@ export const modulesService = {
         full_name: profile.full_name,
         email: profile.email,
         role_id: profile.role_id,
-        role_name: profile.roles?.name || 'Unknown',
+        role_name: resolveRoleName(profile.role_id, profile.roles),
         status: profile.status,
         custom_permission_keys: profile.custom_permission_keys || [],
         revoked_permission_keys: profile.revoked_permission_keys || [],
@@ -156,7 +223,7 @@ export const modulesService = {
         return null;
       }
 
-      const { data: profile, error: profileError } = await supabase
+      const { data: profiles, error: profileError } = await supabase
         .from('user_profiles')
         .select(`
           *,
@@ -167,19 +234,21 @@ export const modulesService = {
           )
         `)
         .eq('id', user.id)
-        .single();
+        .limit(1);
 
-      if (profileError || !profile) {
-        console.error('Profile fetch error:', profileError);
+      if (profileError || !profiles || profiles.length === 0) {
+        if (profileError) console.error('Profile fetch error:', profileError);
         return null;
       }
+
+      const profile = profiles[0];
 
       return {
         id: profile.id,
         full_name: profile.full_name,
         email: profile.email,
         role_id: profile.role_id,
-        role_name: profile.roles?.name || 'Unknown',
+        role_name: resolveRoleName(profile.role_id, profile.roles),
         status: profile.status,
         custom_permission_keys: profile.custom_permission_keys || [],
         revoked_permission_keys: profile.revoked_permission_keys || [],
@@ -193,7 +262,8 @@ export const modulesService = {
   },
 
   hasActiveSession(): boolean {
-    return !!supabase.auth.getUser();
+    if (typeof window === 'undefined') return false;
+    return !!Object.keys(localStorage).find(key => key.includes('-auth-token'));
   },
 
   // User management methods
@@ -216,12 +286,12 @@ export const modulesService = {
         return [];
       }
 
-      return data.map(profile => ({
+      return (data || []).map(profile => ({
         id: profile.id,
         full_name: profile.full_name,
         email: profile.email,
         role_id: profile.role_id,
-        role_name: profile.roles?.name || 'Unknown',
+        role_name: resolveRoleName(profile.role_id, profile.roles),
         status: profile.status,
         custom_permission_keys: profile.custom_permission_keys || [],
         revoked_permission_keys: profile.revoked_permission_keys || [],
@@ -234,30 +304,100 @@ export const modulesService = {
     }
   },
 
+  async _getAuthHeader() {
+    const { data: { session } } = await supabase.auth.getSession();
+    if (!session?.access_token) return {};
+    return { 'Authorization': `Bearer ${session.access_token}` };
+  },
+
   async saveUser(user: UserAccessRow): Promise<UserAccessRow> {
     try {
-      const { error } = await supabase
-        .from('user_profiles')
-        .upsert({
-          id: user.id,
+      const headers = await this._getAuthHeader();
+      const response = await fetch(`/api/auth/users/${user.id}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({
           full_name: user.full_name,
-          email: user.email,
           role_id: user.role_id,
           status: user.status,
           custom_permission_keys: user.custom_permission_keys,
           revoked_permission_keys: user.revoked_permission_keys,
-          temporary_password: user.temporary_password,
-          last_active_at: user.last_active_at,
-        });
+        }),
+      });
 
-      if (error) {
-        console.error('Error saving user:', error);
-        throw error;
+      if (!response.ok) {
+        let errorMessage = `Server error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          // Response was not JSON
+        }
+        throw new Error(errorMessage);
       }
 
       return user;
     } catch (error) {
       console.error('Error in saveUser:', error);
+      throw error;
+    }
+  },
+
+  async updateUserDetails(userId: string, details: { full_name: string; email: string; role_id: string }): Promise<void> {
+    try {
+      const headers = await this._getAuthHeader();
+      const response = await fetch(`/api/auth/users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify(details),
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Server error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          // Response was not JSON
+        }
+        throw new Error(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error updating user details:', error);
+      throw error;
+    }
+  },
+
+  async changeUserPassword(userId: string, newPassword: string): Promise<void> {
+    try {
+      const headers = await this._getAuthHeader();
+      const response = await fetch(`/api/auth/users/${userId}`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify({ password: newPassword }),
+      });
+
+      if (!response.ok) {
+        let errorMessage = `Server error: ${response.status}`;
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          // Response was not JSON
+        }
+        throw new Error(errorMessage);
+      }
+    } catch (error) {
+      console.error('Error changing user password:', error);
       throw error;
     }
   },
@@ -269,43 +409,23 @@ export const modulesService = {
     role_id: string;
   }): Promise<UserAccessRow> {
     try {
-      // First create the auth user using admin client
-      const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
-        email: input.email,
-        password: input.temporary_password,
-        email_confirm: true,
-        user_metadata: {
-          full_name: input.full_name
-        }
+      const headers = await this._getAuthHeader();
+      const response = await fetch(`/api/auth/create-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...headers,
+        },
+        body: JSON.stringify(input),
       });
 
-      if (authError || !authData.user) {
-        throw authError || new Error('Failed to create auth user');
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create user');
       }
 
-      // Get role name
-      const { data: roleData } = await supabase
-        .from('roles')
-        .select('name')
-        .eq('id', input.role_id)
-        .single();
-
-      // Create profile
-      const user: UserAccessRow = {
-        id: authData.user.id,
-        full_name: input.full_name,
-        email: input.email,
-        role_id: input.role_id,
-        role_name: roleData?.name || 'Unknown',
-        status: 'ACTIVE',
-        custom_permission_keys: [],
-        revoked_permission_keys: [],
-        temporary_password: input.temporary_password,
-        last_active_at: new Date().toISOString(),
-      };
-
-      await this.saveUser(user);
-      return user;
+      const data = await response.json();
+      return data.user as UserAccessRow;
     } catch (error) {
       console.error('Error creating user:', error);
       throw error;
@@ -322,10 +442,13 @@ export const modulesService = {
 
       if (error) {
         console.error('Error fetching roles:', error);
-        return [];
       }
 
-      return data as RoleRow[];
+      if (data && data.length > 0) {
+        return data as RoleRow[];
+      }
+
+      return FALLBACK_ROLES;
     } catch (error) {
       console.error('Error in getRoles:', error);
       return [];
@@ -362,14 +485,14 @@ export const modulesService = {
           permission_keys: input.permission_keys || []
         })
         .select()
-        .single();
+        .limit(1);
 
-      if (error) {
+      if (error || !data) {
         console.error('Error creating role:', error);
-        throw error;
+        throw error || new Error('Failed to create role');
       }
 
-      return data as RoleRow;
+      return data[0] as RoleRow;
     } catch (error) {
       console.error('Error in createRole:', error);
       throw error;
@@ -386,14 +509,14 @@ export const modulesService = {
         })
         .eq('id', input.roleId)
         .select()
-        .single();
+        .limit(1);
 
-      if (error) {
+      if (error || !data) {
         console.error('Error updating role:', error);
-        throw error;
+        throw error || new Error('Failed to update role');
       }
 
-      return data as RoleRow;
+      return data[0] as RoleRow;
     } catch (error) {
       console.error('Error in updateRole:', error);
       throw error;
@@ -414,37 +537,46 @@ export const modulesService = {
     return match?.permission || null;
   },
 
-  hasPermission(user: UserAccessRow, permissionKey: string): boolean {
-    // Get role permissions
-    const rolePermissions = user.role_name ? this.getRolePermissions(user.role_id) : [];
+  async hasPermission(user: UserAccessRow, permissionKey: string): Promise<boolean> {
+    // Super Admin Bypass
+    if (user.role_id === 'r1' || user.role_name === 'Super Admin') {
+      return true;
+    }
 
-    // Check if revoked
-    if (user.revoked_permission_keys?.includes(permissionKey)) {
+    if (!this._initialized) {
+      await this.refreshRoles();
+    }
+
+    const role = this._roles.find(r => r.id === user.role_id);
+    const rolePermissions = role ? role.permission_keys : [];
+
+    if ((user.revoked_permission_keys || []).includes(permissionKey)) {
       return false;
     }
 
-    // Check role permissions or custom permissions
-    return rolePermissions.includes(permissionKey) || user.custom_permission_keys.includes(permissionKey);
+    return rolePermissions.includes(permissionKey) || (user.custom_permission_keys || []).includes(permissionKey);
   },
 
-  canAccessRoute(user: UserAccessRow, pathname: string): boolean {
+  async canAccessRoute(user: UserAccessRow, pathname: string): Promise<boolean> {
     const requiredPermission = this.getRoutePermission(pathname);
     if (!requiredPermission) return true;
-    return this.hasPermission(user, requiredPermission);
+    return await this.hasPermission(user, requiredPermission);
   },
 
-  getPermissionCountForUser(user: UserAccessRow): number {
-    const rolePermissions = user.role_name ? this.getRolePermissions(user.role_id) : [];
-    const effective = new Set([...rolePermissions, ...user.custom_permission_keys]);
+  async getPermissionCountForUser(user: UserAccessRow): Promise<number> {
+    // Super Admin Bypass
+    if (user.role_id === 'r1' || user.role_name === 'Super Admin') {
+      return PERMISSIONS.length;
+    }
+
+    if (!this._initialized) {
+      await this.refreshRoles();
+    }
+    const role = this._roles.find(r => r.id === user.role_id);
+    const rolePermissions = role ? role.permission_keys : [];
+    const effective = new Set([...rolePermissions, ...(user.custom_permission_keys || [])]);
     (user.revoked_permission_keys || []).forEach(key => effective.delete(key));
     return effective.size;
-  },
-
-  // Helper method to get role permissions (cached)
-  getRolePermissions(roleId: string): string[] {
-    // This would ideally be cached or fetched from database
-    // For now, return empty array - roles should be fetched separately
-    return [];
   },
 
   // Audit trail methods
@@ -469,6 +601,14 @@ export const modulesService = {
 
   async addAudit(input: Omit<AuditTrailRow, 'id' | 'created_at'>): Promise<AuditTrailRow> {
     try {
+      let performedBy = input.performed_by;
+      
+      // Auto-fill performedBy if not provided
+      if (!performedBy) {
+        const user = await this.getCurrentUser();
+        performedBy = user?.email || 'System';
+      }
+
       const { data, error } = await supabase
         .from('audit_trail')
         .insert({
@@ -476,19 +616,21 @@ export const modulesService = {
           entity_type: input.entity_type,
           entity_id: input.entity_id,
           entity_name: input.entity_name,
-          reason: input.reason,
-          performed_by: input.performed_by,
+          reason: input.reason || 'No reason provided',
+          performed_by: performedBy,
           details: input.details,
+          old_values: (input as any).old_values,
+          new_values: (input as any).new_values,
         })
         .select()
-        .single();
+        .limit(1);
 
-      if (error) {
+      if (error || !data) {
         console.error('Error adding audit entry:', error);
-        throw error;
+        throw error || new Error('Failed to add audit entry');
       }
 
-      return data as AuditTrailRow;
+      return data[0] as AuditTrailRow;
     } catch (error) {
       console.error('Error in addAudit:', error);
       throw error;
@@ -496,70 +638,19 @@ export const modulesService = {
   },
 
   async getAuthenticatedUser(): Promise<UserAccessRow | null> {
-    try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        return null;
-      }
-
-      const { data: profile, error: profileError } = await supabase
-        .from('user_profiles')
-        .select(`
-          *,
-          roles:role_id (
-            id,
-            name,
-            permission_keys
-          )
-        `)
-        .eq('id', user.id)
-        .single();
-
-      if (profileError || !profile) {
-        console.error('Profile fetch error:', profileError);
-        return null;
-      }
-
-      return {
-        id: profile.id,
-        full_name: profile.full_name,
-        email: profile.email,
-        role_id: profile.role_id,
-        role_name: profile.roles?.name || 'Unknown',
-        status: profile.status,
-        custom_permission_keys: profile.custom_permission_keys || [],
-        revoked_permission_keys: profile.revoked_permission_keys || [],
-        temporary_password: profile.temporary_password,
-        last_active_at: profile.last_active_at,
-      } as UserAccessRow;
-    } catch (error) {
-      console.error('Error getting authenticated user:', error);
-      return null;
-    }
+    return this.getCurrentUser();
   },
 
-  // Legacy synchronous methods for backward compatibility
+  // Legacy synchronous methods
   getAuthenticatedUserSync(): UserAccessRow | null {
-    // This is a synchronous version that tries to get from localStorage
-    // Used during migration period
-    try {
-      const users = JSON.parse(localStorage.getItem('ims_users_v1') || '[]');
-      const authenticatedUserId = localStorage.getItem('ims_authenticated_user_id_v1');
-      if (!authenticatedUserId) return null;
-      return users.find((u: UserAccessRow) => u.id === authenticatedUserId && u.status === 'ACTIVE') || null;
-    } catch {
-      return null;
-    }
+    return null;
   },
 
   async saveUsers(users: UserAccessRow[]): Promise<void> {
-    // This method is not applicable to database - users are saved individually
     console.warn('saveUsers: Not implemented for database service');
   },
 
   async setCurrentUser(userId: string): Promise<void> {
-    // This method is not applicable to database - current user is managed by auth
     console.warn('setCurrentUser: Not implemented for database service');
   },
 
@@ -569,5 +660,239 @@ export const modulesService = {
 
   async logout(): Promise<void> {
     return this.signOut();
+  },
+
+  // Business Data Methods
+  async getOrders(): Promise<OrderRow[]> {
+    try {
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        if (isSchemaError(error)) return [];
+        throw error;
+      }
+
+      return data as OrderRow[];
+    } catch (error) {
+      console.error('Error fetching orders:', error);
+      return [];
+    }
+  },
+
+  async createOrder(input: any): Promise<OrderRow> {
+    try {
+      const orderNumber = `PO-${Date.now().toString().slice(-6)}`;
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .insert({
+          ...input,
+          order_number: orderNumber,
+          status: 'PENDING',
+          created_at: new Date().toISOString(),
+        })
+        .select()
+        .limit(1);
+
+      if (error || !data) throw error || new Error('Failed to create order');
+      return data[0] as OrderRow;
+    } catch (error) {
+      console.error('Error creating order:', error);
+      throw error;
+    }
+  },
+
+  async updateOrderStatus(orderId: string, status: OrderRow['status']): Promise<void> {
+    try {
+      const { error } = await supabase
+        .from('purchase_orders')
+        .update({ status })
+        .eq('id', orderId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error('Error updating order status:', error);
+      throw error;
+    }
+  },
+
+  async getChallans(): Promise<ChallanRow[]> {
+    try {
+      const { data, error } = await supabase
+        .from('challans')
+        .select('*')
+        .order('dispatch_date', { ascending: false });
+
+      if (error) {
+        if (isSchemaError(error)) return [];
+        throw error;
+      }
+      return data as ChallanRow[];
+    } catch (error) {
+      console.error('Error fetching challans:', error);
+      return [];
+    }
+  },
+
+  async saveChallans(challans: ChallanRow[]): Promise<void> {
+    console.warn('saveChallans: Implement individual save');
+  },
+
+  async getDeliveryReceipts(): Promise<DeliveryReceiptRow[]> {
+    try {
+      // Robust fetching: try multiple table names and handle schema variations
+      const tables = ['delivery_receipts', 'receipts', 'challans'];
+      for (const table of tables) {
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .limit(100);
+        
+        if (!error && data && data.length > 0) {
+          return data.map(row => ({
+            id: row.id,
+            receipt_no: row.receipt_no || row.challan_no || row.id,
+            date: row.date || row.dispatch_date || row.created_at?.split('T')[0] || '',
+            type: row.type || 'SITE_DELIVERY',
+            project_name: row.project_name || '',
+            vendor_name: row.vendor_name || '',
+            receiver_name: row.receiver_name || '',
+            contact: row.contact || '',
+            status: row.status || 'VERIFIED',
+            items: row.items || []
+          }));
+        }
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching delivery receipts:', error);
+      return [];
+    }
+  },
+
+  async saveDeliveryReceipts(receipts: DeliveryReceiptRow[]): Promise<void> {
+    console.warn('saveDeliveryReceipts: Implement individual save');
+  },
+
+  async getPaymentSlips(): Promise<PaymentSlipRow[]> {
+    try {
+      // Robust fetching: handle missing columns like 'date'
+      const tables = ['payment_slips', 'payments'];
+      for (const table of tables) {
+        const { data, error } = await supabase
+          .from(table)
+          .select('*')
+          .limit(100);
+        
+        if (!error && data) {
+          return data.map(row => ({
+            id: row.id,
+            slip_no: row.slip_no || row.payment_no || row.id,
+            date: row.date || row.payment_date || row.created_at?.split('T')[0] || '',
+            due_date: row.due_date || row.date || row.payment_date || '',
+            vendor_name: row.vendor_name || row.payee || '',
+            po_ref: row.po_ref || '',
+            amount: row.amount || 0,
+            payment_method: row.payment_method || 'BANK_TRANSFER',
+            ref_no: row.ref_no || '',
+            prepared_by: row.prepared_by || '',
+            status: row.status || 'ISSUED'
+          }));
+        }
+      }
+      return [];
+    } catch (error) {
+      console.error('Error fetching payment slips:', error);
+      return [];
+    }
+  },
+
+  async savePaymentSlips(slips: PaymentSlipRow[]): Promise<void> {
+    console.warn('savePaymentSlips: Implement individual save');
+  },
+
+  async getInventorySnapshot(): Promise<InventorySnapshotRow[]> {
+    try {
+      const { data: invRows, error: invError } = await supabase
+        .from('inventory')
+        .select('quantity, variant_id, warehouse_id');
+      
+      if (invError || !invRows) return [];
+
+      const variantIds = Array.from(new Set(invRows.map((r: any) => r.variant_id).filter(Boolean)));
+      const warehouseIds = Array.from(new Set(invRows.map((r: any) => r.warehouse_id).filter(Boolean)));
+
+      const [variantsRes, warehousesRes] = await Promise.all([
+        variantIds.length > 0
+          ? supabase.from('variants').select('id, sku, product_id, attributes').in('id', variantIds)
+          : Promise.resolve({ data: [] }),
+        warehouseIds.length > 0
+          ? supabase.from('warehouses').select('id, name').in('id', warehouseIds)
+          : Promise.resolve({ data: [] }),
+      ]);
+
+      const productIds = Array.from(new Set((variantsRes.data || []).map((v: any) => v.product_id).filter(Boolean)));
+      const productsRes = productIds.length > 0
+        ? await supabase.from('products').select('id, name').in('id', productIds)
+        : { data: [] };
+
+      const variantById = new Map((variantsRes.data || []).map((v: any) => [v.id, v]));
+      const warehouseById = new Map((warehousesRes.data || []).map((w: any) => [w.id, w]));
+      const productById = new Map((productsRes.data || []).map((p: any) => [p.id, p]));
+
+      return invRows.map((item: any) => {
+        const variant = variantById.get(item.variant_id);
+        const product = variant ? productById.get(variant.product_id) : undefined;
+        const warehouse = warehouseById.get(item.warehouse_id);
+        return {
+          variant_id: item.variant_id,
+          sku: variant?.sku || '',
+          product_name: product?.name || '',
+          attributes: (variant?.attributes || {}) as Record<string, string>,
+          warehouse_id: item.warehouse_id,
+          warehouse_name: warehouse?.name || '',
+          quantity: item.quantity,
+        };
+      });
+    } catch (error) {
+      console.error('Error getting inventory snapshot:', error);
+      return [];
+    }
+  },
+
+  async getMovements(): Promise<StockMovementRow[]> {
+    try {
+      const { data, error } = await supabase
+        .from('stock_movements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        if (isSchemaError(error)) return [];
+        throw error;
+      }
+      return data as StockMovementRow[];
+    } catch (error) {
+      console.error('Error fetching movements:', error);
+      return [];
+    }
+  },
+
+  async addMovement(input: Omit<StockMovementRow, 'id' | 'created_at'>): Promise<StockMovementRow> {
+    try {
+      const { data, error } = await supabase
+        .from('stock_movements')
+        .insert(input)
+        .select()
+        .limit(1);
+
+      if (error || !data) throw error || new Error('Failed to add movement');
+      return data[0] as StockMovementRow;
+    } catch (error) {
+      console.error('Error adding movement:', error);
+      throw error;
+    }
   },
 };

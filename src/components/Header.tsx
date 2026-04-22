@@ -38,8 +38,9 @@ export default function Header() {
       : pathname.split('/')[1].charAt(0).toUpperCase() + pathname.split('/')[1].slice(1));
 
   React.useEffect(() => {
-    const syncUser = () => {
-      setCurrentUser(modulesService.getAuthenticatedUser());
+    const syncUser = async () => {
+      const user = await modulesService.getAuthenticatedUser();
+      setCurrentUser(user);
     };
 
     syncUser();

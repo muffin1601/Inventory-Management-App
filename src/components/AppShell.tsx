@@ -26,63 +26,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Mark as client-side after first render
+  // Consolidate auth and permission checks
   React.useEffect(() => {
-    setIsClient(true);
-  }, []);
+    let mounted = true;
 
-  // Initialize permissions on mount
-  React.useEffect(() => {
-    const initPermissions = async () => {
-      const sessionActive = modulesService.hasActiveSession();
+    const checkAccess = async () => {
+      // First check session
+      const authenticatedUser = await modulesService.getAuthenticatedUser();
+      if (!mounted) return;
+
+      const sessionActive = Boolean(authenticatedUser);
       setHasSession(sessionActive);
 
-      if (sessionActive) {
-        const authenticatedUser = modulesService.getAuthenticatedUser();
-        const userToCheck = authenticatedUser || await modulesService.getCurrentUser();
-        const routeAccess = userToCheck ? modulesService.canAccessRoute(userToCheck, pathname) : false;
+      if (sessionActive && authenticatedUser) {
+        // Check route access
+        const routeAccess = await modulesService.canAccessRoute(authenticatedUser, pathname);
+        if (!mounted) return;
+
+        // DEBUG LOGGING
+        const allRoles = await modulesService.getRoles();
+        console.log('[AppShell] Permission Check:', {
+          pathname,
+          user: authenticatedUser.email,
+          role: authenticatedUser.role_id,
+          routePermission: modulesService.getRoutePermission(pathname),
+          canAccess: routeAccess,
+          availableRoles: allRoles.map(r => r.id),
+        });
+
         setCanAccessRoute(routeAccess);
       } else {
         setCanAccessRoute(false);
       }
-    };
-
-    initPermissions();
-  }, [pathname]);
-
-  React.useEffect(() => {
-    const syncAccess = async () => {
-      const authenticatedUser = modulesService.getAuthenticatedUser();
-      const sessionActive = Boolean(authenticatedUser);
-      const userToCheck = authenticatedUser || await modulesService.getCurrentUser();
-      const allRoles = await modulesService.getRoles();
-      const routeAccess = sessionActive && userToCheck ? modulesService.canAccessRoute(userToCheck, pathname) : false;
-
-      // DEBUG LOGGING
-      console.log('[AppShell] Permission Check:', {
-        pathname,
-        authenticatedUser: authenticatedUser?.email,
-        authenticatedUserRole: authenticatedUser?.role_id,
-        userToCheck: userToCheck?.email,
-        userRole: userToCheck?.role_id,
-        routePermissionRequired: modulesService.getRoutePermission(pathname),
-        hasPermission: authenticatedUser ? modulesService.hasPermission(authenticatedUser, modulesService.getRoutePermission(pathname) || '') : 'N/A',
-        canAccess: routeAccess,
-        allRoles: allRoles.map(r => ({ id: r.id, name: r.name, permissions: r.permission_keys.length })),
-      });
       
-      setHasSession(sessionActive);
-      setCanAccessRoute(routeAccess);
+      setIsClient(true);
     };
 
-    syncAccess();
-    window.addEventListener('ims-current-user-changed', syncAccess);
-    window.addEventListener('ims-users-changed', syncAccess);
-    window.addEventListener('ims-auth-changed', syncAccess);
+    checkAccess();
+
+    const handleAuthChange = () => checkAccess();
+    window.addEventListener('ims-auth-changed', handleAuthChange);
+    window.addEventListener('ims-current-user-changed', handleAuthChange);
+    
     return () => {
-      window.removeEventListener('ims-current-user-changed', syncAccess);
-      window.removeEventListener('ims-users-changed', syncAccess);
-      window.removeEventListener('ims-auth-changed', syncAccess);
+      mounted = false;
+      window.removeEventListener('ims-auth-changed', handleAuthChange);
+      window.removeEventListener('ims-current-user-changed', handleAuthChange);
     };
   }, [pathname]);
 

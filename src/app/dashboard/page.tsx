@@ -180,9 +180,11 @@ export default function Dashboard() {
           projectsService.listProjects(),
         ]);
 
-        const challans = modulesService.getChallans();
-        const receipts = modulesService.getDeliveryReceipts();
-        const slips = modulesService.getPaymentSlips();
+        const [challans, receipts, slips] = await Promise.all([
+          modulesService.getChallans(),
+          modulesService.getDeliveryReceipts(),
+          modulesService.getPaymentSlips(),
+        ]);
 
         const productCount = products.length;
         const allVariants = products.flatMap((product: any) => product.variants || []);

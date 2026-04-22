@@ -144,6 +144,7 @@ function RateInquiryContent() {
 
   // Sync state with URL
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (tabParam === 'compare') setActiveTab('compare');
     else setActiveTab('list');
   }, [tabParam]);

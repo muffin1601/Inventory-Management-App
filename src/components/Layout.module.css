@@ -132,7 +132,8 @@
 }
 
 .logoImage {
-  width: 100%;
+  width: 180px;
+  height: auto;
   max-height: 34px;
   object-fit: contain;
   display: block;
