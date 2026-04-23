@@ -27,6 +27,7 @@ export default function InventoryPage() {
   const [qty, setQty] = useState(0);
   const [reason, setReason] = useState('');
   const [op, setOp] = useState<'IN' | 'OUT' | 'TRANSFER'>('IN');
+  const [statusFilter, setStatusFilter] = useState<'all' | 'in-stock' | 'low-stock'>('all');
   const [isActionModalOpen, setIsActionModalOpen] = useState(false);
   const [transferWarehouse, setTransferWarehouse] = useState('');
   const [canAdjust, setCanAdjust] = useState(false);
@@ -78,13 +79,31 @@ export default function InventoryPage() {
   }, [rows]);
 
   const filtered = useMemo(() => {
-    return rows.filter((row) => {
+    const result = rows.filter((row) => {
       const q = search.toLowerCase();
       const matchesSearch = row.sku.toLowerCase().includes(q) || row.product_name.toLowerCase().includes(q);
       const matchesWarehouse = !stockFilterWarehouse || row.warehouse_id === stockFilterWarehouse;
-      return matchesSearch && matchesWarehouse;
+      
+      const isInStock = row.quantity > 20;
+      const matchesStatus = statusFilter === 'all' || 
+                           (statusFilter === 'in-stock' && isInStock) || 
+                           (statusFilter === 'low-stock' && !isInStock);
+                           
+      return matchesSearch && matchesWarehouse && matchesStatus;
     });
-  }, [rows, search, stockFilterWarehouse]);
+
+    // Sort: In Stock (quantity > 20) on top, then by SKU
+    return result.sort((a, b) => {
+      const aInStock = a.quantity > 20 ? 1 : 0;
+      const bInStock = b.quantity > 20 ? 1 : 0;
+      
+      if (aInStock !== bInStock) {
+        return bInStock - aInStock; // 1 (In Stock) before 0 (Low Stock)
+      }
+      
+      return a.sku.localeCompare(b.sku);
+    });
+  }, [rows, search, stockFilterWarehouse, statusFilter]);
 
   const variantOptions = useMemo(
     () => variants.map((item) => ({
@@ -333,12 +352,18 @@ export default function InventoryPage() {
                 <option key={item.id} value={item.id}>{item.name}</option>
               ))}
             </select>
+            <select className={styles.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as any)}>
+              <option value="all">All Status</option>
+              <option value="in-stock">In Stock</option>
+              <option value="low-stock">Low Stock</option>
+            </select>
             <button
               className={styles.iconButton}
               title="Clear stock filters"
               onClick={() => {
                 setSearch('');
                 setStockFilterWarehouse('');
+                setStatusFilter('all');
               }}
             >
               <Filter size={18} />

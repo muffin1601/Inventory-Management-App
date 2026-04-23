@@ -2,7 +2,7 @@
 
 import React, { useMemo, useState } from 'react';
 import styles from './Orders.module.css';
-import { Search, Filter, ArrowRight, Eye, Plus, Trash2, Copy, Printer, Bell, ChevronDown, Check, X, Settings } from 'lucide-react';
+import { Search, Filter, Eye, Plus, Trash2, Printer, Check, X, Settings } from 'lucide-react';
 import { modulesService } from '@/lib/services/modules';
 import { inventoryService } from '@/lib/services/inventory';
 import { projectsService } from '@/lib/services/projects';
@@ -48,17 +48,6 @@ function normalizeVendorRow(row: VendorRow): VendorOption {
 }
 
 type ProjectOption = { id: string; name: string; delivery_address?: string };
-type VariantOption = {
-  id: string;
-  sku: string;
-  product_name: string;
-  unit?: string;
-  price?: number;
-  total_stock: number;
-  warehouse_id?: string;
-  warehouse_name?: string;
-};
-
 type ProductWithVariants = {
   name: string;
   variants?: Array<{
@@ -116,16 +105,15 @@ export default function OrdersPage() {
   const [draft, setDraft] = useState({ vendor_id: '', project_id: '', delivery_address: '', payment_terms: '' });
   const [lines, setLines] = useState<PurchaseOrderLineDraft[]>([createDraftLine()]);
   const [search, setSearch] = useState('');
-  const [typeFilter, setTypeFilter] = useState<'ALL' | OrderType>('ALL');
+  const [typeFilter] = useState<'ALL' | OrderType>('ALL');
   const [statusFilter, setStatusFilter] = useState<'ALL' | OrderRow['status']>('ALL');
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
   const [canCreate, setCanCreate] = useState(false);
   const [canApprove, setCanApprove] = useState(false);
   const [canCancel, setCanCancel] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
   const [selectedPO, setSelectedPO] = useState<OrderRow | null>(null);
-  const [statusChangeModal, setStatusChangeModal] = useState<{ order: OrderRow; newStatus: string } | null>(null);
+  const [statusDropdownOrderId, setStatusDropdownOrderId] = useState<string | null>(null);
 
   React.useEffect(() => {
     async function load() {
@@ -184,7 +172,6 @@ export default function OrdersPage() {
         setCanCreate(await modulesService.hasPermission(current, 'orders.create'));
         setCanApprove(await modulesService.hasPermission(current, 'orders.approve'));
         setCanCancel(await modulesService.hasPermission(current, 'orders.cancel'));
-        setIsAdmin((await modulesService.hasPermission(current, 'roles.manage')) || current.role_name === 'Super Admin');
       }
     }
 
@@ -192,7 +179,7 @@ export default function OrdersPage() {
     const onUserChange = () => load();
     window.addEventListener('ims-current-user-changed', onUserChange);
     return () => window.removeEventListener('ims-current-user-changed', onUserChange);
-  }, []);
+  }, [showToast]);
 
   const variantOptions = useMemo(() => {
     return products.flatMap((product) =>
@@ -375,7 +362,7 @@ export default function OrdersPage() {
             product_name: line.product_name,
             unit: line.unit,
             quantity: line.quantity,
-            price: line.price,
+            unit_price: line.price,
             gst_rate: line.gst_rate,
             gst_amount: gstAmount,
             total_price: baseAmount + gstAmount,
@@ -396,7 +383,7 @@ export default function OrdersPage() {
         entity_type: 'order',
         entity_id: newOrder?.id || 'new',
         entity_name: newOrder?.order_number || 'New Order',
-        reason: 'Manual order creation',
+        reason: 'Purchase order created',
         details: `Created ${newOrder?.type} order for ${newOrder?.vendor_name}. Items: ${validLines.length}`,
         new_values: {
           vendor_name: vendor.name,
@@ -418,15 +405,12 @@ export default function OrdersPage() {
   }
 
   async function approveOrder(order: OrderRow) {
-    if (order.status !== 'PENDING') return;
+    if (order.status !== 'pending_approval') return;
 
     const confirmation = await confirmAction({
       title: 'Approve this order?',
-      message: 'This will apply stock changes immediately.',
+      message: 'This will apply stock changes immediately. This action cannot be undone.',
       confirmText: 'Approve',
-      requireReason: true,
-      reasonLabel: 'Approval reason',
-      reasonPlaceholder: 'Why are you approving this order?',
     });
     if (!confirmation.confirmed) return;
 
@@ -452,7 +436,7 @@ export default function OrdersPage() {
             warehouse_id: recordWarehouseId,
             type: order.type === 'SALE' ? 'OUT' : 'IN',
             quantity: item.quantity,
-            notes: `${order.type} order ${order.order_number} | Reason: ${confirmation.reason}`,
+            notes: `${order.type} order ${order.order_number}`,
           });
         } catch (error) {
           console.error('Failed to record inventory movement:', error);
@@ -473,7 +457,7 @@ export default function OrdersPage() {
           warehouse_name: item.warehouse_name || order.warehouse_name || 'Unknown',
           type: order.type === 'SALE' ? 'OUT' : 'IN',
           quantity: item.quantity,
-          notes: `Approved ${order.order_number} | Reason: ${confirmation.reason}`,
+          notes: `Approved ${order.order_number}`,
         });
       } catch (error) {
         console.error('Failed to add movement record:', error);
@@ -487,7 +471,7 @@ export default function OrdersPage() {
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
-        reason: confirmation.reason,
+        reason: 'Order approved via system',
         performed_by: currentUser?.email || 'Unknown',
         details: `${order.type} approved for ${order.vendor_name || order.entity_name}. Stock impacted.`,
         old_values: { status: order.status },
@@ -509,23 +493,21 @@ export default function OrdersPage() {
 
   async function changeOrderStatus(order: OrderRow, newStatus: string) {
     const statusLabels: Record<string, string> = {
-      'PENDING': 'Pending Approval',
-      'APPROVED': 'Approved',
-      'CANCELLED': 'Rejected',
-      'SENT': 'Sent',
-      'ACKNOWLEDGED': 'Acknowledged',
-      'PARTIALLY_RECEIVED': 'Partially Received',
-      'COMPLETED': 'Completed',
-      'CLOSED': 'Closed',
+      'pending_approval': 'Pending Approval',
+      'approved': 'Approved',
+      'cancelled': 'Rejected',
     };
+
+    // Only allow valid status values
+    if (!['pending_approval', 'approved', 'cancelled'].includes(newStatus)) {
+      showToast('Invalid status value', 'error');
+      return;
+    }
 
     const confirmation = await confirmAction({
       title: `Change status to ${statusLabels[newStatus]}?`,
       message: `The order status will be updated from ${statusLabels[order.status]} to ${statusLabels[newStatus]}.`,
       confirmText: 'Change Status',
-      requireReason: true,
-      reasonLabel: 'Reason for status change',
-      reasonPlaceholder: 'Why are you changing this status?',
     });
     if (!confirmation.confirmed) return;
 
@@ -536,7 +518,7 @@ export default function OrdersPage() {
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
-        reason: confirmation.reason,
+        reason: `Status changed to ${newStatus}`,
         performed_by: currentUser?.email || 'Unknown',
         details: `Status changed from ${order.status} to ${newStatus}`,
         old_values: { status: order.status },
@@ -547,9 +529,8 @@ export default function OrdersPage() {
     }
 
     try {
-      await modulesService.updateOrderStatus(order.id, newStatus as any);
+      await modulesService.updateOrderStatus(order.id, newStatus);
       await refreshOrders();
-      setStatusChangeModal(null);
       showToast(`Order status updated to ${statusLabels[newStatus]}.`, 'success');
     } catch (error) {
       console.error('Failed to change status:', error);
@@ -558,14 +539,11 @@ export default function OrdersPage() {
   }
 
   async function rejectOrder(order: OrderRow) {
-    if (order.status !== 'PENDING') return;
+    if (order.status !== 'pending_approval') return;
     const confirmation = await confirmAction({
       title: 'Reject this order?',
-      message: 'Select a status and provide rejection reason.',
+      message: 'The order will be marked as cancelled and cannot be restored.',
       confirmText: 'Reject Order',
-      requireReason: true,
-      reasonLabel: 'Rejection reason',
-      reasonPlaceholder: 'Why are you rejecting this order?',
     });
     if (!confirmation.confirmed) return;
 
@@ -576,7 +554,7 @@ export default function OrdersPage() {
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
-        reason: confirmation.reason,
+        reason: 'Order rejected by user',
         performed_by: currentUser?.email || 'Unknown',
         details: `${order.type} for ${order.vendor_name || order.entity_name}`,
       });
@@ -600,9 +578,6 @@ export default function OrdersPage() {
       title: 'Delete this purchase order?',
       message: 'The PO will be marked as cancelled. This action cannot be undone.',
       confirmText: 'Delete',
-      requireReason: true,
-      reasonLabel: 'Deletion reason',
-      reasonPlaceholder: 'Why are you deleting this order?',
     });
     if (!confirmation.confirmed) return;
 
@@ -614,7 +589,7 @@ export default function OrdersPage() {
         entity_type: 'order',
         entity_id: order.id,
         entity_name: order.order_number,
-        reason: confirmation.reason,
+        reason: 'Order deleted by user',
         performed_by: currentUser?.email || 'Unknown',
         details: `${order.type} for ${order.vendor_name || order.entity_name}`,
       });
@@ -716,8 +691,8 @@ export default function OrdersPage() {
       </div>
       <div class="info-block">
         <div class="info-label">Status</div>
-        <div class="status ${order.status === 'APPROVED' ? 'status-approved' : order.status === 'CANCELLED' ? 'status-rejected' : 'status-pending'}">
-          ${order.status === 'APPROVED' ? 'Approved' : order.status === 'CANCELLED' ? 'Rejected' : 'Pending Approval'}
+        <div class="status ${order.status === 'approved' ? 'status-approved' : order.status === 'cancelled' ? 'status-rejected' : 'status-pending'}">
+          ${order.status === 'approved' ? 'Approved' : order.status === 'cancelled' ? 'Rejected' : 'Pending Approval'}
         </div>
       </div>
       <div class="info-block">
@@ -1179,8 +1154,8 @@ export default function OrdersPage() {
                 </div>
                 <div>
                   <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginBottom: '0.25rem' }}>STATUS</p>
-                  <span className={selectedPO.status === 'APPROVED' ? styles.statusCreated : selectedPO.status === 'CANCELLED' ? styles.statusCancelled : styles.statusPendingApproval}>
-                    {selectedPO.status === 'APPROVED' ? 'created' : selectedPO.status === 'CANCELLED' ? 'cancelled' : 'pending approval'}
+                  <span className={selectedPO.status === 'approved' ? styles.statusCreated : selectedPO.status === 'cancelled' ? styles.statusCancelled : styles.statusPendingApproval}>
+                    {selectedPO.status === 'approved' ? 'created' : selectedPO.status === 'cancelled' ? 'cancelled' : 'pending approval'}
                   </span>
                 </div>
               </div>
@@ -1264,74 +1239,6 @@ export default function OrdersPage() {
         </div>
       )}
 
-      {statusChangeModal && (
-        <div className={styles.bulkModalOverlay} onClick={() => setStatusChangeModal(null)}>
-          <div className={styles.bulkModalContent} onClick={(e) => e.stopPropagation()}>
-            <div className={styles.bulkModalHeader}>
-              <div>
-                <h2 className={styles.title} style={{ fontSize: '1.2rem', margin: 0 }}>Change Order Status</h2>
-                <p style={{ color: 'var(--text-secondary)', fontSize: '0.9rem', marginTop: '0.5rem' }}>{statusChangeModal.order.order_number}</p>
-              </div>
-              <button
-                className={styles.actionBtn}
-                onClick={() => setStatusChangeModal(null)}
-                style={{ fontSize: '1.5rem', padding: '0' }}
-                title="Close"
-              >
-                ✕
-              </button>
-            </div>
-            <div className={styles.bulkModalBody} style={{ padding: '1.5rem' }}>
-              <div style={{ marginBottom: '1.5rem' }}>
-                <label className={styles.fieldLabel}>Select New Status</label>
-                <select
-                  className={styles.select}
-                  value={statusChangeModal.newStatus}
-                  onChange={(e) => setStatusChangeModal({ ...statusChangeModal, newStatus: e.target.value })}
-                  style={{ marginTop: '0.5rem' }}
-                >
-                  <option value="PENDING">Pending Approval</option>
-                  <option value="APPROVED">Approved</option>
-                  <option value="CANCELLED">Rejected</option>
-                  <option value="SENT">Sent</option>
-                  <option value="ACKNOWLEDGED">Acknowledged</option>
-                  <option value="PARTIALLY_RECEIVED">Partially Received</option>
-                  <option value="COMPLETED">Completed</option>
-                  <option value="CLOSED">Closed</option>
-                </select>
-              </div>
-              <div>
-                <label className={styles.fieldLabel}>Reason for Status Change</label>
-                <textarea
-                  className={styles.vendorDetailInput}
-                  placeholder="Explain why you are changing this order's status..."
-                  rows={4}
-                  style={{ marginTop: '0.5rem' }}
-                  id="statusChangeReason"
-                />
-              </div>
-            </div>
-            <div className={styles.bulkModalFooter}>
-              <button className={styles.bulkCancelBtn} onClick={() => setStatusChangeModal(null)}>
-                Cancel
-              </button>
-              <button
-                className={styles.submitBtn}
-                onClick={() => {
-                  const reason = (document.getElementById('statusChangeReason') as HTMLTextAreaElement)?.value || '';
-                  if (!reason.trim()) {
-                    showToast('Please provide a reason for the status change.', 'error');
-                    return;
-                  }
-                  changeOrderStatus(statusChangeModal.order, statusChangeModal.newStatus);
-                }}
-              >
-                Change Status
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
 
       <div className={styles.card}>
         <div className={styles.toolbar}>
@@ -1353,57 +1260,64 @@ export default function OrdersPage() {
         <table className={styles.table}>
           <thead>
             <tr>
+              <th style={{ width: '40px' }}>#</th>
               <th>PO NUMBER</th>
-              <th>VENDOR</th>
+              <th>VENDOR & PROJECT</th>
               <th>TOTAL</th>
               <th>STATUS</th>
               <th>DATE</th>
-              <th>ACTIONS</th>
+              <th style={{ textAlign: 'right' }}>ACTIONS</th>
             </tr>
           </thead>
           <tbody>
             {filteredOrders.length === 0 ? (
               <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
+                <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
                   No purchase orders found. Use New Purchase Order to start.
                 </td>
               </tr>
-            ) : paginatedOrders.map((order) => {
+            ) : paginatedOrders.map((order, index) => {
               const displayName = order.vendor_name || order.entity_name || 'Unknown';
               const orderTotal = (order.items || []).reduce((sum, item) => {
                 const baseAmount = (item.price || 0) * (item.quantity || 0);
                 const gstAmount = baseAmount * ((item.gst_rate || 0) / 100);
                 return sum + baseAmount + gstAmount;
               }, 0);
-              const statusMap: Record<string, 'created' | 'pending_approval'> = {
-                'APPROVED': 'created',
-                'PENDING': 'pending_approval',
-                'CANCELLED': 'created',
-              };
-              const mappedStatus = statusMap[order.status] || 'created';
+              const isPending = order.status === 'pending_approval';
               return (
                 <tr key={order.id}>
-                  <td><strong>{order.order_number}</strong></td>
-                  <td>{displayName}</td>
+                  <td style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{(page - 1) * pageSize + index + 1}</td>
+                  <td><div style={{ fontWeight: 800 }}>{order.order_number}</div></td>
                   <td>
-                    <strong>₹{new Intl.NumberFormat("en-IN", { style: "decimal", maximumFractionDigits: 2 }).format(orderTotal)}</strong>
+                    <div style={{ fontWeight: 600 }}>{displayName}</div>
+                    {order.project_name && (
+                      <div style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>{order.project_name}</div>
+                    )}
                   </td>
                   <td>
-                    <span className={order.status === 'APPROVED' ? styles.statusCreated : order.status === 'CANCELLED' ? styles.statusCancelled : styles.statusPendingApproval}>
-                      {order.status === 'APPROVED' ? 'approved' : order.status === 'CANCELLED' ? 'rejected' : 'pending approval'}
+                    <div style={{ fontWeight: 700 }}>₹{new Intl.NumberFormat("en-IN").format(orderTotal)}</div>
+                  </td>
+                  <td>
+                    <span className={`${styles.statusBadge} ${
+                      order.status === 'approved' ? styles.statusApproved : 
+                      order.status === 'cancelled' ? styles.statusCancelled : styles.statusPending
+                    }`}>
+                      {order.status === 'pending_approval' ? 'Pending Approval' : 
+                       order.status === 'approved' ? 'Approved' : 
+                       order.status === 'cancelled' ? 'Rejected' : order.status}
                     </span>
                   </td>
                   <td>{new Date(order.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
                   <td>
-                    <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', justifyContent: 'flex-end' }}>
-                      {canApprove && order.status === 'PENDING' && (
-                        <button className={styles.actionBtn} title="Approve" onClick={() => approveOrder(order)}>
-                          <Check size={16} color="currentColor" />
+                    <div className={styles.inlineActions}>
+                      {isPending && canApprove && (
+                        <button className={`${styles.miniBtn} ${styles.miniApprove}`} onClick={() => approveOrder(order)} title="Quick Approve">
+                          <Check size={12} />
                         </button>
                       )}
-                      {canCancel && order.status === 'PENDING' && (
-                        <button className={styles.actionBtn} title="Reject" onClick={() => rejectOrder(order)}>
-                          <X size={16} color="currentColor" />
+                      {isPending && canCancel && (
+                        <button className={`${styles.miniBtn} ${styles.miniReject}`} onClick={() => rejectOrder(order)} title="Quick Reject">
+                          <X size={12} />
                         </button>
                       )}
                       <button className={styles.actionBtn} title="View details" onClick={() => setSelectedPO(order)}>
@@ -1412,11 +1326,51 @@ export default function OrdersPage() {
                       <button className={styles.actionBtn} title="Download PDF" onClick={() => downloadPDF(order)}>
                         <Printer size={16} />
                       </button>
-                      <button className={styles.actionBtn} title="Change Status" onClick={() => setStatusChangeModal({ order, newStatus: order.status })}>
-                        <Settings size={16} />
-                      </button>
+                      <div className={styles.statusActionWrapper}>
+                        <button
+                          className={styles.actionBtn}
+                          title="Change Status"
+                          type="button"
+                          onClick={() => setStatusDropdownOrderId(statusDropdownOrderId === order.id ? null : order.id)}
+                        >
+                          <Settings size={16} />
+                        </button>
+                        {statusDropdownOrderId === order.id && (
+                          <div className={styles.statusDropdownMenu} onMouseLeave={() => setStatusDropdownOrderId(null)}>
+                            {['pending_approval', 'approved', 'cancelled']
+                              .filter((status) => status !== order.status)
+                              .map((status) => {
+                                const statusLabels: Record<string, string> = {
+                                  pending_approval: 'Pending Approval',
+                                  approved: 'Approved',
+                                  cancelled: 'Rejected',
+                                };
+                                return (
+                                  <button
+                                    key={status}
+                                    type="button"
+                                    className={styles.statusOption}
+                                    onClick={async () => {
+                                      const conf = await confirmAction({
+                                        title: `Change status to ${statusLabels[status]}?`,
+                                        message: `Current: ${statusLabels[order.status] || order.status}\nNew: ${statusLabels[status]}`,
+                                        confirmText: 'Change',
+                                      });
+                                      setStatusDropdownOrderId(null);
+                                      if (conf.confirmed) {
+                                        await changeOrderStatus(order, status);
+                                      }
+                                    }}
+                                  >
+                                    {statusLabels[status]}
+                                  </button>
+                                );
+                              })}
+                          </div>
+                        )}
+                      </div>
                       <button className={styles.actionBtn} title="Delete" onClick={() => deletePurchaseOrder(order)}>
-                        <Trash2 size={16} color="currentColor" />
+                        <Trash2 size={14} />
                       </button>
                     </div>
                   </td>

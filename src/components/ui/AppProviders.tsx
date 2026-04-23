@@ -1,6 +1,7 @@
-"use client";
+'use client';
 
 import React, { createContext, useCallback, useContext, useMemo, useState } from 'react';
+import { AuthProvider } from '@/lib/AuthContext';
 import styles from './UiOverlays.module.css';
 
 type ToastType = 'success' | 'error' | 'info';
@@ -112,57 +113,59 @@ export function AppProviders({ children }: { children: React.ReactNode }) {
   const value = useMemo(() => ({ showToast, confirmAction }), [showToast, confirmAction]);
 
   return (
-    <UiContext.Provider value={value}>
-      {children}
+    <AuthProvider>
+      <UiContext.Provider value={value}>
+        {children}
 
-      <div className={styles.toastStack}>
-        {toasts.map((toast) => (
-          <div key={toast.id} className={`${styles.toast} ${styles[toast.type]}`}>
-            {toast.message}
-          </div>
-        ))}
-      </div>
+        <div className={styles.toastStack}>
+          {toasts.map((toast) => (
+            <div key={toast.id} className={`${styles.toast} ${styles[toast.type]}`}>
+              {toast.message}
+            </div>
+          ))}
+        </div>
 
-      {confirmState.open && (
-        <div className={styles.overlay}>
-          <div className={styles.dialog}>
-            <h3>{confirmState.title}</h3>
-            <p>{confirmState.message}</p>
-            
-            {confirmState.requireReason && (
-              <div className={styles.reasonBlock}>
-                <label className={styles.reasonLabel}>
-                  {confirmState.reasonLabel || 'Reason'}
-                </label>
-                <textarea
-                  className={styles.reasonInput}
-                  placeholder={confirmState.reasonPlaceholder || 'Please provide a reason...'}
-                  value={confirmState.reasonValue}
-                  onChange={(e) => setConfirmState(prev => ({ ...prev, reasonValue: e.target.value }))}
-                />
+        {confirmState.open && (
+          <div className={styles.overlay}>
+            <div className={styles.dialog}>
+              <h3>{confirmState.title}</h3>
+              <p>{confirmState.message}</p>
+              
+              {confirmState.requireReason && (
+                <div className={styles.reasonBlock}>
+                  <label className={styles.reasonLabel}>
+                    {confirmState.reasonLabel || 'Reason'}
+                  </label>
+                  <textarea
+                    className={styles.reasonInput}
+                    placeholder={confirmState.reasonPlaceholder || 'Please provide a reason...'}
+                    value={confirmState.reasonValue}
+                    onChange={(e) => setConfirmState(prev => ({ ...prev, reasonValue: e.target.value }))}
+                  />
+                </div>
+              )}
+              
+              <div className={styles.dialogActions}>
+                <button
+                  type="button"
+                  className={styles.secondaryBtn}
+                  onClick={handleCancel}
+                >
+                  {confirmState.cancelText}
+                </button>
+                <button
+                  type="button"
+                  className={styles.primaryBtn}
+                  onClick={handleConfirm}
+                >
+                  {confirmState.confirmText}
+                </button>
               </div>
-            )}
-            
-            <div className={styles.dialogActions}>
-              <button
-                type="button"
-                className={styles.secondaryBtn}
-                onClick={handleCancel}
-              >
-                {confirmState.cancelText}
-              </button>
-              <button
-                type="button"
-                className={styles.primaryBtn}
-                onClick={handleConfirm}
-              >
-                {confirmState.confirmText}
-              </button>
             </div>
           </div>
-        </div>
-      )}
-    </UiContext.Provider>
+        )}
+      </UiContext.Provider>
+    </AuthProvider>
   );
 }
 

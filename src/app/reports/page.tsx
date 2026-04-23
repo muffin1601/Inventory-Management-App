@@ -3,11 +3,9 @@
 import React from "react";
 import styles from "./Reports.module.css";
 import {
-  ArrowRight,
   Boxes,
   ClipboardList,
   Download,
-  FileSpreadsheet,
   FolderKanban,
   History,
   Search,
@@ -321,8 +319,8 @@ export default function ReportsPage() {
 
       const nextCount = current.totalOrders + 1;
       current.totalOrders = nextCount;
-      current.approvedOrders += order.status === "APPROVED" ? 1 : 0;
-      current.pendingOrders += order.status === "PENDING" ? 1 : 0;
+      current.approvedOrders += order.status === "approved" ? 1 : 0;
+      current.pendingOrders += order.status === "pending_approval" ? 1 : 0;
       current.totalValue += getOrderValue(order);
       current.linkedProjects += order.project_id ? 1 : 0;
       current.averageOrderAge =
@@ -383,8 +381,8 @@ export default function ReportsPage() {
   const totals = React.useMemo(() => {
     const totalStock = snapshot.reduce((sum, row) => sum + row.quantity, 0);
     const lowStockRows = snapshot.filter((row) => row.quantity <= 20).length;
-    const pendingOrders = orders.filter((order) => order.status === "PENDING").length;
-    const approvedOrders = orders.filter((order) => order.status === "APPROVED").length;
+    const pendingOrders = orders.filter((order) => order.status === "pending_approval").length;
+    const approvedOrders = orders.filter((order) => order.status === "approved").length;
     const pendingBoqQty = projectSummary.reduce((sum, row) => sum + row.pendingQty, 0);
     const recentMovements = movements.filter((row) => {
       const createdAt = new Date(row.created_at).getTime();
@@ -790,9 +788,9 @@ export default function ReportsPage() {
                       <td>
                         <span
                           className={
-                            order.status === "APPROVED"
+                            order.status === "approved"
                               ? styles.statusApproved
-                              : order.status === "PENDING"
+                              : order.status === "pending_approval"
                                 ? styles.statusPending
                                 : styles.statusCancelled
                           }

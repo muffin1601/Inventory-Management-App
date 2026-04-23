@@ -186,7 +186,7 @@ export default function StockPage() {
     const next = new Map<string, number>();
 
     orders
-      .filter((order) => order.status === 'PENDING' && order.type === 'SALE')
+      .filter((order) => order.status === 'pending_approval' && order.type === 'SALE')
       .forEach((order) => {
         const key = `${order.variant_id}::${order.warehouse_id}`;
         next.set(key, (next.get(key) || 0) + (order.quantity || 0));
@@ -276,7 +276,7 @@ export default function StockPage() {
         };
       });
     })
-  ), [filteredVariants, promisedMap]);
+  ), [boqReservedByVariant, filteredVariants, promisedMap]);
 
   const paginatedStockRows = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
@@ -369,10 +369,12 @@ export default function StockPage() {
   }
 
   async function handleAdjustStock() {
-    if (!selectedVariant || !selectedWarehouse || quantity <= 0 || !adjustmentReason) {
-      showToast('Please complete item, warehouse, quantity, and reason.', 'error');
+    if (!selectedVariant || !selectedWarehouse || quantity <= 0) {
+      showToast('Please complete item, warehouse, and quantity.', 'error');
       return;
     }
+
+    const effectiveReason = adjustmentReason || 'Stock Adjustment';
 
     try {
       const variant = variants.find((item) => item.id === selectedVariant);
@@ -383,7 +385,7 @@ export default function StockPage() {
       const actorLabel = actor ? `${actor.full_name} (${actor.email})` : 'Unknown User';
       const auditNote = buildAuditNote(
         `Stock ${adjustmentType}`,
-        adjustmentReason,
+        effectiveReason,
         actorLabel,
       );
 
@@ -416,15 +418,17 @@ export default function StockPage() {
   }
 
   async function handleSaveEdit() {
-    if (!editingRow || !editWarehouseId || editStock < 0 || !editReason) {
-      showToast('Please complete warehouse, stock, and reason.', 'error');
+    if (!editingRow || !editWarehouseId || editStock < 0) {
+      showToast('Please complete warehouse and stock.', 'error');
       return;
     }
+
+    const effectiveReason = editReason || 'Manual Inventory Update';
 
     try {
       const actor = await modulesService.getCurrentUser();
       const actorLabel = actor ? `${actor.full_name} (${actor.email})` : 'Unknown User';
-      const auditNote = buildAuditNote('Stock Row Edit', editReason, actorLabel);
+      const auditNote = buildAuditNote('Stock Row Edit', effectiveReason, actorLabel);
       const sanitizedAttributes = sanitizeAttributes({
         ...editingRow.attributes,
         Manufacturer: editManufacturer.trim(),
@@ -469,15 +473,17 @@ export default function StockPage() {
   }
 
   async function handleDeleteRow() {
-    if (!deleteRow || !deleteReason) {
-      showToast('Please select a reason before deleting.', 'error');
+    if (!deleteRow) {
+      showToast('Please select a row to delete.', 'error');
       return;
     }
+
+    const effectiveReason = deleteReason || 'Record Deletion';
 
     try {
       const actor = await modulesService.getCurrentUser();
       const actorLabel = actor ? `${actor.full_name} (${actor.email})` : 'Unknown User';
-      const auditNote = buildAuditNote('Variant Delete', deleteReason, actorLabel);
+      const auditNote = buildAuditNote('Variant Delete', effectiveReason, actorLabel);
 
       await inventoryService.recordMovement({
         variant_id: deleteRow.variantId,
@@ -663,6 +669,7 @@ export default function StockPage() {
               </div>
             </div>
 
+            {/* Reason field temporarily removed
             <div className={styles.formGroup}>
               <SearchableSelect
                 label="Reason"
@@ -679,6 +686,7 @@ export default function StockPage() {
                 }}
               />
             </div>
+            */}
 
             <div className={styles.formGroup}>
               <label>Quantity</label>
@@ -793,6 +801,7 @@ export default function StockPage() {
                 />
               </div>
 
+              {/* Reason field temporarily removed
               <div className={styles.formGroup}>
                 <SearchableSelect
                   label="Reason"
@@ -809,6 +818,7 @@ export default function StockPage() {
                   }}
                 />
               </div>
+              */}
 
             </div>
 

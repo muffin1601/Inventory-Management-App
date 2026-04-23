@@ -13,7 +13,6 @@ import {
   ClipboardList,
   ShoppingCart,
   FileText,
-  Package,
   UploadCloud,
   History,
   Shield,
@@ -56,8 +55,8 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
     {
       label: 'Operations',
       items: [
-        { name: 'Site Records', path: '/site-records', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Payments', path: '/payments', icon: <CreditCard size={18} strokeWidth={1.5} color="currentColor" /> },
+        { name: 'Payment Records', path: '/site-records', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
+        // { name: 'Payments', path: '/payments', icon: <CreditCard size={18} strokeWidth={1.5} color="currentColor" /> },
         { name: 'Challans', path: '/challans', icon: <Truck size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
@@ -65,13 +64,13 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
       label: 'Reports & Admin',
       items: [
         { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="currentColor" /> },
+        // { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="currentColor" /> },
         { name: 'User Management', path: '/users', icon: <Shield size={18} strokeWidth={1.5} color="currentColor" /> },
       ],
     },
   ];
 
-  const [visibleNavGroups, setVisibleNavGroups] = React.useState(navGroups);
+  const visibleNavGroups = navGroups;
   const [currentUserLabel, setCurrentUserLabel] = React.useState<{
     name: string;
     role: string;

@@ -5,11 +5,10 @@ import styles from './Products.module.css';
 import { 
   Plus, Search, Filter, ChevronRight, ChevronDown, 
   Package, Zap, Edit2, Trash2, 
-  Check, X, Layers, Save, AlertCircle,
+  Check, X, Layers, AlertCircle,
   Tag, Info, History, ChevronLeft, LayoutGrid, List
 } from 'lucide-react';
 import { inventoryService } from '@/lib/services/inventory';
-import { ProductSummary } from '@/types/inventory';
 import { supabase } from '@/lib/supabase';
 import { modulesService } from '@/lib/services/modules';
 import { useUi } from '@/components/ui/AppProviders';
@@ -33,12 +32,12 @@ export default function ProductsPage() {
   const [products, setProducts] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [expandedProducts, setExpandedProducts] = useState<Set<string>>(new Set());
-  const [editingProduct, setEditingProduct] = useState<any>(null);
+  const [, setEditingProduct] = useState<any>(null);
 
   // Dynamic Data & Lookups
   const [categoriesList, setCategoriesList] = useState<string[]>([]);
   const [manufacturersList, setManufacturersList] = useState<any[]>([]);
-  const [attributeTypesList, setAttributeTypesList] = useState<any[]>([]);
+  const [, setAttributeTypesList] = useState<any[]>([]);
   const [warehousesList, setWarehousesList] = useState<any[]>([]);
   const [unitsList, setUnitsList] = useState<string[]>([]);
   const [selectedWarehouse, setSelectedWarehouse] = useState<string>('');
@@ -169,13 +168,19 @@ export default function ProductsPage() {
 
   const createManufacturerOption = async (value: string) => {
     const created = await inventoryService.createManufacturer(value.trim().toUpperCase());
-    setManufacturersList(await inventoryService.getManufacturers());
+    setManufacturersList((prev) => {
+      const alreadyExists = prev.some((item) => item.name === created.name);
+      return alreadyExists ? prev : [...prev, created];
+    });
     return created.name;
   };
 
   const createWarehouseOption = async (value: string) => {
     const created = await inventoryService.createWarehouse(value.trim().toUpperCase());
-    setWarehousesList(await inventoryService.getWarehouses());
+    setWarehousesList((prev) => {
+      const alreadyExists = prev.some((item) => item.name === created.name);
+      return alreadyExists ? prev : [...prev, created];
+    });
     return created.name;
   };
 
@@ -195,29 +200,6 @@ export default function ProductsPage() {
     setExpandedProducts(newExpanded);
   };
 
-  const handleOpenGenerate = (product: any) => {
-    setIsCreating(true);
-    setEditingProduct(product);
-    setCurrentStep(2); // Jump straight to attributes
-    setProductName(product.name);
-    setCategory(product.category || '');
-    setManufacturer(product.brand || '');
-    setDescription(product.description || '');
-    // Re-hydrate attributes from existing variants if any
-    const existingAttrs: Attribute[] = [];
-    product.variants?.forEach((v: any) => {
-      Object.entries(v.attributes).forEach(([key, val]) => {
-        const existing = existingAttrs.find(a => a.name === key);
-        if (existing) {
-          if (!existing.values.includes(val as string)) existing.values.push(val as string);
-        } else {
-          existingAttrs.push({ name: key, values: [val as string] });
-        }
-      });
-    });
-    setAttributes(existingAttrs.length > 0 ? existingAttrs : [...PRESET_ATTRIBUTES]);
-  };
-
   const [isAddingSingle, setIsAddingSingle] = useState(false);
   const [isEditingVariant, setIsEditingVariant] = useState(false);
   const [isDeleteModalOpen, setIsDeleteModalOpen] = useState(false);
@@ -234,26 +216,6 @@ export default function ProductsPage() {
     unit: 'Numbers',
     quantity: 0
   });
-
-  const handleOpenAddSingle = (product: any) => {
-    const defaultManufacturer = product.brand || product.variants?.[0]?.brand || '';
-    const defaultUnit =
-      product.variants?.[0]?.unit ||
-      product.variants?.[0]?.attributes?.Unit ||
-      'Numbers';
-
-    setActiveProductForSingle(product);
-    setIsAddingSingle(true);
-    setSingleVariantForm({
-      sku: `${product.name.substring(0,3).toUpperCase()}-${Date.now().toString().slice(-4)}`,
-      manufacturer: defaultManufacturer,
-      price: product.variants?.[0]?.price || 0,
-      attributes: {},
-      warehouse: warehousesList[0]?.name || '',
-      unit: defaultUnit,
-      quantity: 0
-    });
-  };
 
   const handleOpenEditVariant = (product: any, variant: any) => {
     setActiveProductForSingle(product);
@@ -300,7 +262,7 @@ export default function ProductsPage() {
       setIsDeleteModalOpen(false);
       fetchProducts();
       showToast("Item option deleted.", 'success');
-    } catch (err) { showToast("Error deleting item option.", 'error'); }
+    } catch { showToast("Error deleting item option.", 'error'); }
   };
 
   const handleDeleteProduct = (productId: string) => {
@@ -326,7 +288,7 @@ export default function ProductsPage() {
       setDeleteConfirm({ isOpen: false, productId: null, reason: '' });
       fetchProducts();
       showToast("Product deleted.", 'success');
-    } catch (err) {
+    } catch {
       showToast("Failed to delete product.", 'error');
     }
   };
@@ -340,15 +302,6 @@ export default function ProductsPage() {
     warehouse: '',
     minStock: 0
   });
-
-  const handleOpenAdvancedGenerate = (product: ProductSummary) => {
-    setActiveProductForSingle(product);
-    setIsGenerateWizardOpen(true);
-    setGenerateStep(1);
-    setSelectedAttributeValues({});
-    setGenManufacturers([]);
-    setGenDefaultSettings(prev => ({ ...prev, warehouse: warehousesList[0]?.name || '' }));
-  };
 
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
 
@@ -478,8 +431,18 @@ export default function ProductsPage() {
   };
 
   const handleSaveDraft = async () => {
+    if (isGenerating) return;
+
+    const timeoutId = setTimeout(() => {
+      if (isGenerating) {
+        setIsGenerating(false);
+        showToast("Draft saving is taking too long.", 'error');
+      }
+    }, 15000);
+
     try {
       setIsGenerating(true);
+      showToast("Saving draft...", 'info');
       const warehouseId = warehousesList.find(w => w.name === selectedWarehouse)?.id;
       const productData = {
         name: productName,
@@ -490,20 +453,123 @@ export default function ProductsPage() {
         main_warehouse_id: warehouseId
       };
       await inventoryService.createProduct(productData, []);
-      alert("Product saved as draft!");
+      showToast("Product saved as draft!", 'success');
+      
+      setIsGenerating(false);
       setIsCreating(false);
       resetForm();
       fetchProducts();
-    } catch (err) {
-      alert("Failed to save draft.");
+    } catch (err: any) {
+      console.error("Failed to save draft:", err);
+      showToast(`Error: ${err.message || 'Check connection'}`, 'error');
     } finally {
       setIsGenerating(false);
+      clearTimeout(timeoutId);
     }
   };
 
+  const handleWizardSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+  };
+
+  const submitAddSingleVariant = async () => {
+    try {
+      showToast("Adding variant to stock...", 'info');
+      await inventoryService.addVariant({
+        product_id: activeProductForSingle.id,
+        price: singleVariantForm.price,
+        attributes: {
+          ...singleVariantForm.attributes,
+          ...(singleVariantForm.manufacturer ? { Manufacturer: singleVariantForm.manufacturer } : {}),
+          ...(singleVariantForm.unit ? { Unit: singleVariantForm.unit } : {})
+        },
+        warehouse: singleVariantForm.warehouse,
+        stock_quantity: singleVariantForm.quantity,
+        sku: singleVariantForm.sku
+      });
+      setIsAddingSingle(false);
+      showToast("Variant added to stock successfully.", 'success');
+      fetchProducts();
+    } catch {
+      alert("Error adding variant");
+    }
+  };
+
+  const handleAddSingleSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitAddSingleVariant();
+  };
+
+  const submitEditVariant = async () => {
+    try {
+      showToast("Updating variant...", 'info');
+      const { error: vError } = await supabase.from('variants').update({
+        price: singleVariantForm.price,
+        attributes: {
+          ...singleVariantForm.attributes,
+          ...(singleVariantForm.manufacturer ? { Manufacturer: singleVariantForm.manufacturer } : {}),
+          ...(singleVariantForm.unit ? { Unit: singleVariantForm.unit } : {})
+        }
+      }).eq('id', activeVariantForEdit.id);
+      if (vError) throw vError;
+
+      const targetWarehouse = warehousesList.find(w => w.name === singleVariantForm.warehouse);
+      if (targetWarehouse?.id) {
+        const { data: existingInv } = await supabase.from('inventory')
+          .select('id')
+          .eq('variant_id', activeVariantForEdit.id)
+          .eq('warehouse_id', targetWarehouse.id)
+          .maybeSingle();
+
+        if (existingInv) {
+          const { error: sError } = await supabase.from('inventory')
+            .update({
+              quantity: singleVariantForm.quantity,
+              warehouse_id: targetWarehouse.id
+            })
+            .eq('id', existingInv.id);
+          if (sError) throw sError;
+        } else {
+          const { error: sError } = await supabase.from('inventory')
+            .insert({
+              variant_id: activeVariantForEdit.id,
+              warehouse_id: targetWarehouse.id,
+              quantity: singleVariantForm.quantity
+            });
+          if (sError) throw sError;
+        }
+      }
+
+      showToast("Variant updated successfully.", 'success');
+      setIsEditingVariant(false);
+      fetchProducts();
+    } catch {
+      alert("Error updating variant data");
+    }
+  };
+
+  const handleEditVariantSubmit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    await submitEditVariant();
+  };
+
+
   const handleSaveProduct = async () => {
+    if (isGenerating) return;
+    
+    console.log("Starting handleSaveProduct...");
+    let hasTimedOut = false;
+    // Safety timeout to surface unusually slow requests.
+    const timeoutId = setTimeout(() => {
+      hasTimedOut = true;
+      console.warn("Save operation timed out after 15s. Forcing reset.");
+      showToast("Save is taking longer than expected. Finishing in background...", 'info');
+    }, 45000);
+
     try {
       setIsGenerating(true);
+      showToast("Saving product...", 'info');
+      
       const warehouseId = warehousesList.find(w => w.name === selectedWarehouse)?.id;
       const productData = {
         name: productName,
@@ -525,40 +591,60 @@ export default function ProductsPage() {
           price: v.price || 0
         }));
 
+      console.log(`Saving ${enabledVariants.length} variants...`);
+
+      if (enabledVariants.length === 0) {
+        showToast("At least one variant must be enabled.", 'error');
+        setIsGenerating(false);
+        clearTimeout(timeoutId);
+        return;
+      }
+
       let result;
+      const isUpdate = Boolean(editingProductId);
+      const targetProductId = editingProductId;
       if (editingProductId) {
+        console.log("Updating existing product:", editingProductId);
         result = await inventoryService.updateProduct(editingProductId, productData, enabledVariants);
-        await modulesService.addAudit({
-          action: 'UPDATE_PRODUCT',
-          entity_type: 'inventory',
-          entity_id: editingProductId,
-          entity_name: productName,
-          reason: 'Product details or variants updated',
-          details: `Updated product ${productName}. Variants count: ${enabledVariants.length}`
-        });
       } else {
+        console.log("Creating new product:", productName);
         result = await inventoryService.createProduct(productData, enabledVariants);
-        await modulesService.addAudit({
-          action: 'CREATE_PRODUCT',
-          entity_type: 'inventory',
-          entity_id: (result as any)?.id || 'new',
-          entity_name: productName,
-          reason: 'New product added to catalog',
-          details: `Created product ${productName} with ${enabledVariants.length} variants.`
-        });
       }
       
+      console.log("Save operation successful.");
+      showToast(isUpdate ? "Product updated." : "Product published.", 'success');
+      
+      // Reset UI immediately after core save succeeds.
+      setIsGenerating(false); 
       setIsCreating(false);
       setEditingProductId(null);
       setEditingProduct(null);
       resetForm();
-      fetchProducts();
-      showToast(editingProductId ? "Product updated." : "Product created.", 'success');
-    } catch (err) {
-      console.error("Failed to save product:", err);
-      showToast("Failed to save product.", 'error');
-    } finally {
+
+      // Run non-critical follow-ups in background so save feels instant.
+      const createdId = (result as any)?.id;
+      const auditEntityId = isUpdate ? targetProductId : createdId;
+      void (async () => {
+        if (auditEntityId) {
+          await modulesService.addAudit({
+            action: isUpdate ? 'UPDATE_PRODUCT' : 'CREATE_PRODUCT',
+            entity_type: 'inventory',
+            entity_id: auditEntityId,
+            entity_name: productName,
+            reason: isUpdate ? 'Product updated' : 'New product added',
+            details: `${isUpdate ? 'Updated' : 'Created'} ${productName} with ${enabledVariants.length} variants.`,
+          }).catch((err) => console.warn("Audit log failed:", err));
+        }
+        await fetchProducts();
+      })();
+    } catch (err: any) {
+      console.error("Critical error saving product:", err);
+      if (!hasTimedOut) {
+        showToast(`Error: ${err.message || 'Check connection'}`, 'error');
+      }
       setIsGenerating(false);
+    } finally {
+      clearTimeout(timeoutId);
     }
   };
 
@@ -581,21 +667,23 @@ export default function ProductsPage() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
-        <div>
-          <h1 className={styles.title}>Item Catalog</h1>
-          <p className={styles.subtitle}>Products with options. Auto-generate item codes from combinations.</p>
+      {!isCreating && !isAddingSingle && !isEditingVariant && (
+        <div className={styles.header}>
+          <div>
+            <h1 className={styles.title}>Item Catalog</h1>
+            <p className={styles.subtitle}>Products with options. Auto-generate item codes from combinations.</p>
+          </div>
+          {canCreateProducts && (
+            <button className={styles.primaryAction} onClick={() => setIsCreating(true)}>
+              <Plus size={18} style={{ marginRight: 8 }} />
+              Add Product
+            </button>
+          )}
         </div>
-        {!isCreating && !isAddingSingle && !isEditingVariant && canCreateProducts && (
-          <button className={styles.primaryAction} onClick={() => setIsCreating(true)}>
-            <Plus size={18} style={{ marginRight: 8 }} />
-            Add Product
-          </button>
-        )}
-      </div>
+      )}
 
-      {(!isCreating && !isAddingSingle && !isEditingVariant) ? (
-        <>
+      {!isCreating && !isAddingSingle && !isEditingVariant ? (
+        <div className={styles.catalogContent}>
           <div className={styles.toolbar}>
             <div className={styles.searchBox}>
               <Search size={18} className={styles.searchIcon} />
@@ -726,16 +814,18 @@ export default function ProductsPage() {
               </div>
             )}
           </div>
-        </>
-      ) : isAddingSingle && activeProductForSingle ? (
+        </div>
+      ) : null}
+
+      {isAddingSingle && activeProductForSingle ? (
         <div className={styles.creatorWrapper}>
           <div className={styles.wizardHeader} style={{ marginBottom: '1.5rem', borderBottom: 'none' }}>
-            <button className={styles.secondaryBtn} onClick={() => setIsAddingSingle(false)} style={{ padding: '0.4rem 0.8rem' }}>
+            <button type="button" className={styles.secondaryBtn} onClick={() => setIsAddingSingle(false)} style={{ padding: '0.4rem 0.8rem' }}>
               <ChevronLeft size={16} strokeWidth={1.5} /> Back to Catalog
             </button>
           </div>
           
-          <div style={{ maxWidth: '900px', margin: '0 auto' }}>
+          <form onSubmit={handleAddSingleSubmit} style={{ maxWidth: '900px', margin: '0 auto' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: '1.5rem', borderBottom: '1px solid #f1f5f9', paddingBottom: '1rem' }}>
               <div>
                 <h3 style={{ fontSize: '1.1rem', fontWeight: 700 }}>Add Single Variant Instance</h3>
@@ -833,46 +923,31 @@ export default function ProductsPage() {
 
             <div className={styles.footerActions} style={{ borderTop: '1px solid #f1f5f9', paddingTop: '2rem' }}>
               <div className={styles.leftActions}>
-                 <button className={styles.wizardBackBtn} onClick={() => setIsAddingSingle(false)}>Cancel & Clear</button>
+                 <button type="button" className={styles.wizardBackBtn} onClick={() => setIsAddingSingle(false)}>Cancel & Clear</button>
               </div>
               <div className={styles.rightActions}>
                  <button 
+                  type="submit"
                   className={styles.wizardNextBtn} 
                   style={{ background: '#312e81', fontSize: '0.8rem', padding: '0.6rem 2rem' }}
-                  onClick={async () => {
-                    try {
-                      await inventoryService.addVariant({
-                        product_id: activeProductForSingle.id,
-                        price: singleVariantForm.price,
-                        attributes: { 
-                          ...singleVariantForm.attributes, 
-                          ...(singleVariantForm.manufacturer ? { Manufacturer: singleVariantForm.manufacturer } : {}),
-                          ...(singleVariantForm.unit ? { Unit: singleVariantForm.unit } : {})
-                        },
-                        warehouse: singleVariantForm.warehouse,
-                        stock_quantity: singleVariantForm.quantity,
-                        sku: singleVariantForm.sku
-                      });
-                      setIsAddingSingle(false);
-                      fetchProducts();
-                    } catch (err) { alert("Error adding variant"); }
-                  }}
                  >
                    Verify & Add to Stock
                  </button>
               </div>
             </div>
-          </div>
+          </form>
         </div>
-      ) : isEditingVariant && activeProductForSingle && activeVariantForEdit ? (
+      ) : null}
+
+      {isEditingVariant && activeProductForSingle && activeVariantForEdit ? (
         <div className={styles.creatorWrapper}>
           <div className={styles.topActions}>
-            <button className={styles.secondaryBtn} onClick={() => setIsEditingVariant(false)} style={{ padding: '0.5rem 1rem' }}>
+            <button type="button" className={styles.secondaryBtn} onClick={() => setIsEditingVariant(false)} style={{ padding: '0.5rem 1rem' }}>
               <ChevronLeft size={16} strokeWidth={1.5} /> Back to Catalog
             </button>
           </div>
 
-          <div style={{ width: '100%' }}>
+          <form onSubmit={handleEditVariantSubmit} style={{ width: '100%' }}>
              <div style={{ paddingLeft: '0.5rem' }}>
                 <h3 style={{ fontSize: '1.25rem', fontWeight: 700, color: 'var(--text-primary)' }}>Edit Variant</h3>
                 <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', marginBottom: '2rem' }}>
@@ -978,66 +1053,23 @@ export default function ProductsPage() {
 
             <div className={styles.footerActions} style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1.5rem' }}>
               <div className={styles.leftActions}>
-                 <button className={styles.wizardBackBtn} onClick={() => setIsEditingVariant(false)}>Cancel</button>
+                 <button type="button" className={styles.wizardBackBtn} onClick={() => setIsEditingVariant(false)}>Cancel</button>
               </div>
               <div className={styles.rightActions}>
                  <button 
+                  type="submit"
                   className={styles.wizardNextBtn} 
                   style={{ background: 'var(--accent-primary)', fontSize: '0.85rem', padding: '0.7rem 3rem' }}
-                  onClick={async () => {
-                    try {
-                       // 1. Update Variant details
-                      const { error: vError } = await supabase.from('variants').update({
-                        price: singleVariantForm.price,
-                        attributes: { 
-                          ...singleVariantForm.attributes, 
-                          ...(singleVariantForm.manufacturer ? { Manufacturer: singleVariantForm.manufacturer } : {}),
-                          ...(singleVariantForm.unit ? { Unit: singleVariantForm.unit } : {})
-                        },
-                      }).eq('id', activeVariantForEdit.id);
-                      if (vError) throw vError;
-
-                      // 2. Update Stock/Warehouse details
-                      const targetWarehouse = warehousesList.find(w => w.name === singleVariantForm.warehouse);
-                      
-                      if (targetWarehouse?.id) {
-                        const { data: existingInv } = await supabase.from('inventory')
-                          .select('id')
-                          .eq('variant_id', activeVariantForEdit.id)
-                          .eq('warehouse_id', targetWarehouse.id)
-                          .maybeSingle();
-
-                        if (existingInv) {
-                          const { error: sError } = await supabase.from('inventory')
-                            .update({
-                              quantity: singleVariantForm.quantity,
-                              warehouse_id: targetWarehouse.id
-                            })
-                            .eq('id', existingInv.id);
-                          if (sError) throw sError;
-                        } else {
-                          const { error: sError } = await supabase.from('inventory')
-                            .insert({
-                              variant_id: activeVariantForEdit.id,
-                              warehouse_id: targetWarehouse.id,
-                              quantity: singleVariantForm.quantity
-                            });
-                          if (sError) throw sError;
-                        }
-                      }
-
-                      setIsEditingVariant(false);
-                      fetchProducts();
-                    } catch (err) { alert("Error updating variant data"); }
-                  }}
                  >
                    Update
                  </button>
               </div>
             </div>
-          </div>
+          </form>
         </div>
-      ) : isCreating ? (
+      ) : null}
+
+      {isCreating ? (
         <div className={styles.creatorWrapper}>
           <div className={styles.topActions}>
             <button className={styles.secondaryBtn} onClick={() => setIsCreating(false)}>
@@ -1047,7 +1079,7 @@ export default function ProductsPage() {
               <X size={22} strokeWidth={1.5} />
             </button>
           </div>
-          <div className={styles.wizardContainer}>
+          <form onSubmit={handleWizardSubmit} className={styles.wizardContainer}>
             {/* Professional Vertical Steps Sidebar */}
             <div className={styles.verticalSidebar}>
               <div className={`${styles.vertStep} ${currentStep >= 1 ? styles.vertActive : ''}`}>
@@ -1352,6 +1384,7 @@ export default function ProductsPage() {
                 ))}
 
                 <button 
+                  type="button"
                   className={styles.generateBtn} 
                   style={{ background: 'white', borderStyle: 'dashed', color: 'var(--text-secondary)' }}
                   onClick={() => {
@@ -1396,35 +1429,33 @@ export default function ProductsPage() {
                  </div>
               </div>
             )}
-            </div>
           </div>
 
           <div className={styles.footerActions}>
             <div className={styles.leftActions}>
-               <button className={styles.wizardBackBtn} onClick={currentStep === 1 ? () => setIsCreating(false) : handleBack}>
+               <button type="button" className={styles.wizardBackBtn} onClick={currentStep === 1 ? () => setIsCreating(false) : handleBack}>
                  {currentStep === 1 ? 'Cancel' : 'Back'}
                </button>
             </div>
             <div className={styles.rightActions}>
-               {currentStep < 3 && (
-                 <button className={styles.draftBtn} onClick={handleSaveDraft} disabled={isGenerating}>
-                   Save as Draft
-                 </button>
-               )}
+               <button type="button" className={styles.draftBtn} onClick={handleSaveDraft} disabled={isGenerating}>
+                 Save as Draft
+               </button>
                {currentStep < 3 ? (
-                 <button className={styles.wizardNextBtn} onClick={handleNext}>
+                 <button type="button" className={styles.wizardNextBtn} onClick={handleNext}>
                    {currentStep === 1 ? 'Configure Variants' : 'Generate Matrix'} <ChevronRight size={18} />
                  </button>
                ) : (
-                 <button className={styles.wizardNextBtn} onClick={handleSaveProduct} disabled={isGenerating}>
+                <button type="button" className={styles.wizardNextBtn} disabled={isGenerating} onClick={handleSaveProduct}>
                    {isGenerating ? 'Saving...' : 'Publish to Catalog'}
                  </button>
                )}
             </div>
           </div>
+        </form>
         </div>
       ) : null}
-
+      
       {/* Delete Reason Modal - Audit compliant */}
       {isDeleteModalOpen && (
         <div className={styles.modalOverlay}>
@@ -1881,7 +1912,7 @@ export default function ProductsPage() {
 
                           setGenerateStep(4);
                           fetchProducts();
-                        } catch (err) { alert("Generation Failed"); }
+                        } catch { alert("Generation Failed"); }
                       }
                     }}
                   >

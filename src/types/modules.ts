@@ -24,7 +24,7 @@ export interface StockMovementRow {
 }
 
 export type OrderType = 'PURCHASE' | 'SALE' | 'RETURN';
-export type OrderStatus = 'PENDING' | 'APPROVED' | 'CANCELLED';
+export type OrderStatus = 'pending_approval' | 'approved' | 'cancelled';
 
 export interface OrderLine {
   id: string;
@@ -106,6 +106,23 @@ export interface UserAccessRow {
   last_active_at?: string;
 }
 
+export type LoginErrorCode = 
+  | 'INVALID_CREDENTIALS'
+  | 'USER_NOT_FOUND'
+  | 'ACCOUNT_DISABLED'
+  | 'ACCOUNT_PENDING'
+  | 'PROFILE_NOT_FOUND'
+  | 'DATABASE_ERROR'
+  | 'UNKNOWN_ERROR';
+
+export interface LoginResponse {
+  user: UserAccessRow | null;
+  error: {
+    code: LoginErrorCode;
+    message: string;
+  } | null;
+}
+
 export interface AuditTrailRow {
   id: string;
   action: string;
@@ -113,7 +130,8 @@ export interface AuditTrailRow {
   entity_id?: string;
   entity_name?: string;
   reason?: string;
-  performed_by?: string; // UUID (string) of the actor
+  performed_by?: string; // UUID of the user
+  performed_by_name?: string; // Display name/email of the user
   old_values?: any;
   new_values?: any;
   details?: string;
@@ -123,6 +141,7 @@ export interface AuditTrailRow {
 
 export interface ChallanItemRow {
   id: string;
+  variant_id?: string;
   name: string;
   quantity: number;
   unit: string;
@@ -143,6 +162,7 @@ export interface ChallanRow {
 
 export interface DeliveryReceiptItemRow {
   id: string;
+  variant_id?: string;
   name: string;
   quantity: number;
   unit: string;

@@ -114,6 +114,7 @@ function withinDays(value: string, days: number) {
 export default function AuditPage() {
   const { showToast } = useUi();
   const [isLoading, setIsLoading] = React.useState(true);
+  const [error, setError] = React.useState<string | null>(null);
   const [auditRows, setAuditRows] = React.useState<AuditTrailRow[]>([]);
   const [movementRows, setMovementRows] = React.useState<StockMovementRow[]>([]);
   const [challans, setChallans] = React.useState<ChallanRow[]>([]);
@@ -123,10 +124,13 @@ export default function AuditPage() {
   const [moduleFilter, setModuleFilter] = React.useState<ActivityModule>("all");
   const [dateFilter, setDateFilter] = React.useState<"all" | "7" | "30" | "90">("30");
   const [selectedRow, setSelectedRow] = React.useState<ActivityRow | null>(null);
+  const [currentPage, setCurrentPage] = React.useState(1);
+  const [itemsPerPage] = React.useState(50);
 
   React.useEffect(() => {
     async function load() {
       setIsLoading(true);
+      setError(null);
       try {
         const [auditTrail, movements, challanRows, receiptRows, slipRows] = await Promise.all([
           modulesService.getAuditTrail(),
@@ -142,6 +146,7 @@ export default function AuditPage() {
         setSlips(slipRows);
       } catch (error) {
         console.error("Failed to load audit data:", error);
+        setError("Failed to load audit data. Please try again.");
         showToast("Could not load audit activity right now.", "error");
       } finally {
         setIsLoading(false);
@@ -164,7 +169,7 @@ export default function AuditPage() {
       entity_type: row.entity_type,
       entity_name: row.entity_name || row.entity_id || "-",
       reason: row.reason || "-",
-      performed_by: row.performed_by || "-",
+      performed_by: row.performed_by_name || "System",
       details: row.details || "-",
       source: "audit" as const,
     }));
@@ -205,6 +210,18 @@ export default function AuditPage() {
       return matchesQuery && matchesModule && matchesDate;
     });
   }, [activityRows, dateFilter, moduleFilter, query]);
+
+  // Pagination
+  const totalPages = Math.ceil(filteredRows.length / itemsPerPage);
+  const paginatedRows = React.useMemo(() => {
+    const startIndex = (currentPage - 1) * itemsPerPage;
+    return filteredRows.slice(startIndex, startIndex + itemsPerPage);
+  }, [filteredRows, currentPage, itemsPerPage]);
+
+  // Reset to first page when filters change
+  React.useEffect(() => {
+    setCurrentPage(1);
+  }, [query, moduleFilter, dateFilter]);
 
   const summary = React.useMemo(() => {
     const last7Days = filteredRows.filter((row) => withinDays(row.created_at, 7)).length;
@@ -260,7 +277,32 @@ export default function AuditPage() {
 
   return (
     <div className={styles.container}>
-      <div className={styles.header}>
+      <div style={{
+        position: 'absolute',
+        top: 0,
+        left: 0,
+        right: 0,
+        bottom: 0,
+        background: 'rgba(255, 255, 255, 0.8)',
+        backdropFilter: 'blur(4px)',
+        zIndex: 100,
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'center',
+        justifyContent: 'center',
+        textAlign: 'center',
+        padding: '2rem'
+      }}>
+        <History size={64} color="#64748b" style={{ marginBottom: '1.5rem' }} />
+        <h2 style={{ fontSize: '2rem', fontWeight: 600, color: '#1e293b', marginBottom: '1rem' }}>Audit Trail: Coming Soon</h2>
+        <p style={{ maxWidth: '500px', color: '#64748b', fontSize: '1.125rem', lineHeight: 1.6 }}>
+          We are currently preparing the professional audit logging system. 
+          This module will be activated in a future update to provide comprehensive 
+          activity tracking and security monitoring.
+        </p>
+      </div>
+
+      <div className={styles.header} style={{ opacity: 0.3, pointerEvents: 'none' }}>
         <div>
           <h1 className={styles.title}>Audit Trail</h1>
           <p className={styles.subtitle}>
@@ -366,64 +408,110 @@ export default function AuditPage() {
           </div>
 
           {isLoading ? (
-            <div className={styles.emptyState}>Loading audit activity...</div>
+            <div className={styles.emptyState}>
+              <div className={styles.loadingSpinner}></div>
+              Loading audit activity...
+            </div>
+          ) : error ? (
+            <div className={styles.errorState}>
+              <AlertTriangle size={24} />
+              <p>{error}</p>
+              <button
+                className={styles.retryButton}
+                onClick={() => window.location.reload()}
+              >
+                Retry
+              </button>
+            </div>
           ) : (
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th>Date & Time</th>
-                  <th>Action</th>
-                  <th>Module</th>
-                  <th>Entity</th>
-                  <th>Reason</th>
-                  <th>Performed By</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {filteredRows.length === 0 ? (
+            <>
+              <table className={styles.table}>
+                <thead>
                   <tr>
-                    <td colSpan={6} className={styles.emptyCell}>No activity matches the current search and filters.</td>
+                    <th>Date & Time</th>
+                    <th>Action</th>
+                    <th>Module</th>
+                    <th>Entity</th>
+                    <th>Reason</th>
+                    <th>Performed By</th>
+                    <th></th>
                   </tr>
-                ) : (
-                  filteredRows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{formatDateTime(row.created_at)}</td>
-                      <td>
-                        <div className={styles.actionCell}>
-                          {row.action.toLowerCase().includes('delete') || row.action.toLowerCase().includes('cancel') ? (
-                            <AlertTriangle size={14} className={styles.warningIcon} />
-                          ) : (
-                            <Info size={14} className={styles.infoIcon} />
-                          )}
-                          <div className={styles.primaryCell}>{row.action}</div>
-                        </div>
-                        <div className={styles.secondaryCell}>{row.source === "movement" ? "From movement log" : "From audit log"}</div>
-                      </td>
-                      <td>
-                        <span className={styles.moduleBadge}>{row.entity_type.replace("_", " ")}</span>
-                      </td>
-                      <td>
-                        <div className={styles.primaryCell}>{row.entity_name}</div>
-                        <div className={styles.secondaryCell}>{row.details}</div>
-                      </td>
-                      <td>{row.reason}</td>
-                      <td>
-                        <div className={styles.actorCell}>
-                          <UserRound size={14} />
-                          <span>{row.performed_by}</span>
-                        </div>
-                      </td>
-                      <td>
-                        <button className={styles.iconButton} onClick={() => setSelectedRow(row)} title="View Details">
-                          <Eye size={16} />
-                        </button>
+                </thead>
+                <tbody>
+                  {paginatedRows.length === 0 ? (
+                    <tr>
+                      <td colSpan={7} className={styles.emptyCell}>
+                        {filteredRows.length === 0
+                          ? "No activity matches the current search and filters."
+                          : `No results on page ${currentPage} of ${totalPages}.`
+                        }
                       </td>
                     </tr>
-                  ))
-                )}
-              </tbody>
-            </table>
+                  ) : (
+                    paginatedRows.map((row) => (
+                      <tr key={row.id}>
+                        <td>{formatDateTime(row.created_at)}</td>
+                        <td>
+                          <div className={styles.actionCell}>
+                            {row.action.toLowerCase().includes('delete') || row.action.toLowerCase().includes('cancel') ? (
+                              <AlertTriangle size={14} className={styles.warningIcon} />
+                            ) : (
+                              <Info size={14} className={styles.infoIcon} />
+                            )}
+                            <div className={styles.primaryCell}>{row.action}</div>
+                          </div>
+                          <div className={styles.secondaryCell}>{row.source === "movement" ? "From movement log" : "From audit log"}</div>
+                        </td>
+                        <td>
+                          <span className={styles.moduleBadge}>{row.entity_type.replace("_", " ")}</span>
+                        </td>
+                        <td>
+                          <div className={styles.primaryCell}>{row.entity_name}</div>
+                          <div className={styles.secondaryCell}>{row.details}</div>
+                        </td>
+                        <td>{row.reason}</td>
+                        <td>
+                          <div className={styles.actorCell}>
+                            <UserRound size={14} />
+                            <span>{row.performed_by}</span>
+                          </div>
+                        </td>
+                        <td>
+                          <button className={styles.iconButton} onClick={() => setSelectedRow(row)} title="View Details">
+                            <Eye size={16} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))
+                  )}
+                </tbody>
+              </table>
+
+              {/* Pagination */}
+              {totalPages > 1 && (
+                <div className={styles.pagination}>
+                  <button
+                    className={styles.pageButton}
+                    onClick={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+                    disabled={currentPage === 1}
+                  >
+                    Previous
+                  </button>
+
+                  <div className={styles.pageInfo}>
+                    Page {currentPage} of {totalPages} ({filteredRows.length} total results)
+                  </div>
+
+                  <button
+                    className={styles.pageButton}
+                    onClick={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+                    disabled={currentPage === totalPages}
+                  >
+                    Next
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
       </div>

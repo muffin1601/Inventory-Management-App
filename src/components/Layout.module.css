@@ -9,6 +9,14 @@
   background: linear-gradient(180deg, #f8fafc 0%, #eef2f7 100%);
 }
 
+.loadingContainer {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: var(--bg-primary);
+}
+
 .layoutCollapsed .sidebar {
   width: 76px;
 }
@@ -83,7 +91,6 @@
   padding: 2rem;
   background: var(--bg-elevated);
   border: 1px solid var(--border-color);
-  border-radius: 8px;
   min-height: 200px;
 }
 

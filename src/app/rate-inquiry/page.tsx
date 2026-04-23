@@ -3,7 +3,7 @@
 import React, { useState, useEffect, useMemo, Suspense } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import styles from './RateInquiry.module.css';
-import { Plus, Eye, Trash2, Search, Filter, FileText, Upload, Download, CheckCircle2, TrendingDown, Clock, ShieldCheck, ArrowRight, Building2 } from 'lucide-react';
+import { Plus, Eye, Trash2, Search, Filter, Upload, Download, CheckCircle2, TrendingDown, Clock, ArrowRight, Building2 } from 'lucide-react';
 import { projectsService, type ProjectRecord, type BoqItemRecord } from '@/lib/services/projects';
 import { supabase } from '@/lib/supabase';
 import { useUi } from '@/components/ui/AppProviders';
@@ -263,8 +263,6 @@ function RateInquiryContent() {
     return filteredInquiries.slice(startIndex, startIndex + pageSize);
   }, [filteredInquiries, page, pageSize]);
 
-  const totalPages = useMemo(() => Math.ceil(filteredInquiries.length / pageSize), [filteredInquiries.length, pageSize]);
-
   const createInquiry = async () => {
     if (selectedProjects.size === 0) {
       showToast('Please select at least one project', 'error');
@@ -430,8 +428,6 @@ function RateInquiryContent() {
     }
 
     const results: any[] = [];
-    let total1 = 0;
-    let total2 = 0;
 
     csv1.data.forEach((item1) => {
       const name = item1[nh1];
@@ -453,9 +449,6 @@ function RateInquiryContent() {
       const t2 = item2 ? parseVal(item2[th2 || '']) : 0;
       const d2 = item2 ? parseDays(item2[dh2 || '']) : 0;
       const l2 = r2 !== null ? r2 * (1 + g2/100) + t2 : null;
-
-      total1 += l1;
-      if (l2 !== null) total2 += l2;
 
       results.push({
         name,

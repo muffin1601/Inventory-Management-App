@@ -72,7 +72,6 @@ export default function PermissionTest() {
     runDiagnostics();
   }, [runDiagnostics]);
 
-  const adminRole = debug.superAdminRole as any;
   const isAdmin = debug.authenticatedUser?.email === 'admin@nexusims.com';
 
   return (

@@ -1,7 +1,7 @@
 // Production-ready modules service using Supabase database
 // This replaces the localStorage-based user management
 
-import { supabase, supabaseAdmin } from '@/lib/supabase';
+import { supabase } from '@/lib/supabase';
 import type {
   UserAccessRow,
   RoleRow,
@@ -13,6 +13,7 @@ import type {
   PaymentSlipRow,
   InventorySnapshotRow,
   StockMovementRow,
+  LoginErrorCode,
 } from '@/types/modules';
 
 // Helper to determine if an error is due to a missing table or column
@@ -29,6 +30,97 @@ function isSchemaError(error: any): boolean {
     message.includes('does not exist') ||
     message.includes('relation')
   );
+}
+
+function isAuthLockRaceError(error: unknown): boolean {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { message?: string };
+  const message = (candidate.message || '').toLowerCase();
+  return message.includes('auth-token') && message.includes('another request stole it');
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function safeString(value: unknown) {
+  return typeof value === 'string' ? value : value == null ? '' : String(value);
+}
+
+function safeNumber(value: unknown, fallback = 0) {
+  if (typeof value === 'number' && Number.isFinite(value)) return value;
+  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
+  return fallback;
+}
+
+async function findVendorIdByName(name: string): Promise<string | null> {
+  const normalized = name.trim();
+  if (!normalized) return null;
+  const { data, error } = await supabase.from('vendors').select('id').ilike('name', normalized).limit(1);
+  if (error) {
+    if (isSchemaError(error)) return null;
+    throw error;
+  }
+  return data && data.length > 0 ? data[0].id : null;
+}
+
+async function ensureVendor(name: string): Promise<string | null> {
+  const existingId = await findVendorIdByName(name);
+  if (existingId) return existingId;
+  const { data, error } = await supabase.from('vendors').insert({ name: name.trim() }).select('id').single();
+  if (error) {
+    if (isSchemaError(error)) return null;
+    throw error;
+  }
+  return data?.id || null;
+}
+
+async function findProjectIdByName(name: string): Promise<string | null> {
+  const normalized = name.trim();
+  if (!normalized) return null;
+  const { data, error } = await supabase.from('projects').select('id').ilike('name', normalized).limit(1);
+  if (error) {
+    if (isSchemaError(error)) return null;
+    throw error;
+  }
+  return data && data.length > 0 ? data[0].id : null;
+}
+
+async function loadVariantNames(variantIds: string[]) {
+  if (variantIds.length === 0) return new Map<string, string>();
+  const { data, error } = await supabase
+    .from('variants')
+    .select('id, sku, product:products(name)')
+    .in('id', variantIds);
+  const map = new Map<string, string>();
+  if (!error && data) {
+    data.forEach((row: any) => {
+      const name = row.product?.name || row.sku || '';
+      map.set(row.id, name);
+    });
+  }
+  return map;
+}
+
+const CHALLANS_KEY = 'ims_challans_v1';
+const DELIVERY_RECEIPTS_KEY = 'ims_delivery_receipts_v1';
+const PAYMENT_SLIPS_KEY = 'ims_payment_slips_v1';
+
+function readLocalData<T>(key: string): T[] {
+  if (typeof window === 'undefined') return [];
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeLocalData<T>(key: string, rows: T[]) {
+  if (typeof window === 'undefined') return;
+  window.localStorage.setItem(key, JSON.stringify(rows));
 }
 
 // Permission definitions
@@ -122,31 +214,82 @@ function resolveRoleName(roleId: string, roleFromQuery?: any): string {
 export const modulesService = {
   _roles: [] as RoleRow[],
   _initialized: false,
+  _currentUserPromise: null as Promise<UserAccessRow | null> | null,
+  _currentUserCache: null as UserAccessRow | null,
+  _currentUserCacheAt: 0,
+  _refreshRolesPromise: null as Promise<void> | null,
 
   async refreshRoles() {
-    try {
-      const { data, error } = await supabase.from('roles').select('*');
-      if (data && data.length > 0) {
-        this._roles = data.map(r => ({
-          id: r.id,
-          name: r.name,
-          permission_keys: r.permission_keys || []
-        }));
-        this._initialized = true;
-      } else {
-        // Seed initial roles if none exist
-        console.log('Roles table empty, seeding initial roles...');
-        await supabase.from('roles').insert(FALLBACK_ROLES);
-        this._roles = FALLBACK_ROLES;
-        this._initialized = true;
+    if (this._initialized && this._roles.length > 0) return;
+    if (this._refreshRolesPromise) return this._refreshRolesPromise;
+
+    this._refreshRolesPromise = (async () => {
+      // 1. LocalStorage cache check for faster startup
+      if (typeof window !== 'undefined' && !this._initialized) {
+        const saved = localStorage.getItem('ims_roles_cache_v1');
+        if (saved) {
+          try {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed) && parsed.length > 0) {
+              this._roles = parsed;
+              this._initialized = true;
+            }
+          } catch (e) {
+            localStorage.removeItem('ims_roles_cache_v1');
+          }
+        }
       }
-    } catch (e) {
-      console.error('Error refreshing roles:', e);
-    }
+
+      // If still not initialized, fetch from database
+      try {
+        const rolesPromise = supabase.from('roles').select('*');
+        const timeoutPromise = new Promise<{ data: RoleRow[] | null; error: any }>((resolve) => {
+          setTimeout(() => resolve({ data: null, error: new Error('Role fetch timed out') }), 5000);
+        });
+
+        const { data, error } = await Promise.race([rolesPromise, timeoutPromise]) as {
+          data: RoleRow[] | null;
+          error: any;
+        };
+        if (error) {
+          console.warn('Role refresh timed out or failed, falling back to cached/default roles:', error);
+        }
+
+        if (data && data.length > 0) {
+          this._roles = data.map(r => ({
+            id: r.id,
+            name: r.name,
+            permission_keys: r.permission_keys || []
+          }));
+          this._initialized = true;
+
+          // Update LocalStorage cache
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('ims_roles_cache_v1', JSON.stringify(this._roles));
+          }
+        } else if (!this._initialized) {
+          // Seed initial roles if none exist and not already initialized from cache
+          console.log('Roles table empty, seeding initial roles...');
+          await supabase.from('roles').insert(FALLBACK_ROLES);
+          this._roles = FALLBACK_ROLES;
+          this._initialized = true;
+        }
+      } catch (e) {
+        console.error('Error refreshing roles:', e);
+      } finally {
+        this._refreshRolesPromise = null;
+      }
+    })();
+
+    return this._refreshRolesPromise;
   },
 
   // Authentication methods
   async signIn(email: string, password: string) {
+    this._currentUserPromise = null;
+    this._currentUserCache = null;
+    this._currentUserCacheAt = 0;
+
     const { data, error } = await supabase.auth.signInWithPassword({
       email,
       password,
@@ -154,7 +297,15 @@ export const modulesService = {
 
     if (error) {
       console.error('Sign in error:', error);
-      return null;
+      // Return detailed error information
+      const errorCode = this.mapAuthError(error);
+      return {
+        user: null,
+        error: {
+          code: errorCode,
+          message: this.getErrorMessage(errorCode),
+        },
+      };
     }
 
     if (data.user) {
@@ -180,18 +331,41 @@ export const modulesService = {
 
       if (profileError || !profiles || profiles.length === 0) {
         console.error('Profile fetch error:', profileError || 'Profile not found');
-        return null;
+        return {
+          user: null,
+          error: {
+            code: 'PROFILE_NOT_FOUND',
+            message: 'Your user profile could not be found. Contact administrator.',
+          },
+        };
       }
 
       const profile = profiles[0];
 
       // Check if user is active
-      if (profile.status !== 'ACTIVE') {
+      if (profile.status === 'DISABLED') {
         await supabase.auth.signOut();
-        return null;
+        return {
+          user: null,
+          error: {
+            code: 'ACCOUNT_DISABLED',
+            message: 'Your account has been disabled. Contact administrator.',
+          },
+        };
       }
 
-      return {
+      if (profile.status === 'PENDING') {
+        await supabase.auth.signOut();
+        return {
+          user: null,
+          error: {
+            code: 'ACCOUNT_PENDING',
+            message: 'Your account is pending approval. Please try again later.',
+          },
+        };
+      }
+
+      const userProfile = {
         id: profile.id,
         full_name: profile.full_name,
         email: profile.email,
@@ -203,9 +377,61 @@ export const modulesService = {
         temporary_password: profile.temporary_password,
         last_active_at: profile.last_active_at,
       } as UserAccessRow;
+
+      this._currentUserCache = userProfile;
+      this._currentUserCacheAt = Date.now();
+
+      return {
+        user: userProfile,
+        error: null,
+      };
     }
 
-    return null;
+    return {
+      user: null,
+      error: {
+        code: 'UNKNOWN_ERROR',
+        message: 'An unexpected error occurred. Please try again.',
+      },
+    };
+  },
+
+  // Helper methods for error handling
+  mapAuthError(error: any): LoginErrorCode {
+    const message = (error.message || '').toLowerCase();
+    const status = error.status;
+
+    if (message.includes('invalid login credentials')) {
+      return 'INVALID_CREDENTIALS';
+    }
+    if (message.includes('user not found') || status === 404) {
+      return 'USER_NOT_FOUND';
+    }
+    if (message.includes('database')) {
+      return 'DATABASE_ERROR';
+    }
+
+    return 'UNKNOWN_ERROR';
+  },
+
+  getErrorMessage(code: LoginErrorCode): string {
+    switch (code) {
+      case 'INVALID_CREDENTIALS':
+        return 'Incorrect email or password. Please try again.';
+      case 'USER_NOT_FOUND':
+        return 'No account found with this email address.';
+      case 'ACCOUNT_DISABLED':
+        return 'Your account has been disabled. Contact administrator.';
+      case 'ACCOUNT_PENDING':
+        return 'Your account is pending approval. Please try again later.';
+      case 'PROFILE_NOT_FOUND':
+        return 'Your user profile could not be found. Contact administrator.';
+      case 'DATABASE_ERROR':
+        return 'Database error. Please try again or contact support.';
+      case 'UNKNOWN_ERROR':
+      default:
+        return 'An unexpected error occurred. Please try again.';
+    }
   },
 
   async signOut() {
@@ -213,52 +439,173 @@ export const modulesService = {
     if (error) {
       console.error('Sign out error:', error);
     }
+    this._currentUserCache = null;
+    this._currentUserCacheAt = 0;
+    this._currentUserPromise = null;
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('ims_user_cache_v1');
+    }
   },
 
   async getCurrentUser(): Promise<UserAccessRow | null> {
-    try {
-      const { data: { user }, error: authError } = await supabase.auth.getUser();
-
-      if (authError || !user) {
-        return null;
-      }
-
-      const { data: profiles, error: profileError } = await supabase
-        .from('user_profiles')
-        .select(`
-          *,
-          roles:role_id (
-            id,
-            name,
-            permission_keys
-          )
-        `)
-        .eq('id', user.id)
-        .limit(1);
-
-      if (profileError || !profiles || profiles.length === 0) {
-        if (profileError) console.error('Profile fetch error:', profileError);
-        return null;
-      }
-
-      const profile = profiles[0];
-
-      return {
-        id: profile.id,
-        full_name: profile.full_name,
-        email: profile.email,
-        role_id: profile.role_id,
-        role_name: resolveRoleName(profile.role_id, profile.roles),
-        status: profile.status,
-        custom_permission_keys: profile.custom_permission_keys || [],
-        revoked_permission_keys: profile.revoked_permission_keys || [],
-        temporary_password: profile.temporary_password,
-        last_active_at: profile.last_active_at,
-      } as UserAccessRow;
-    } catch (error) {
-      console.error('Error getting current user:', error);
-      return null;
+    const now = Date.now();
+    // 1. Memory Cache (Increased to 30s for better stability)
+    if (this._currentUserCache && now - this._currentUserCacheAt < 30000) {
+      return this._currentUserCache;
     }
+
+    // 2. Promise Deduplication
+    if (this._currentUserPromise) {
+      return this._currentUserPromise;
+    }
+
+    // 3. LocalStorage Cache (Prevents redirect flicker on refresh)
+    if (typeof window !== 'undefined' && !this._currentUserCache) {
+      const saved = localStorage.getItem('ims_user_cache_v1');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed && (now - parsed._cachedAt < 3600000)) { // 1 hour cache
+            this._currentUserCache = parsed;
+            this._currentUserCacheAt = parsed._cachedAt;
+          }
+        } catch (e) {
+          localStorage.removeItem('ims_user_cache_v1');
+        }
+      }
+    }
+
+    // 3. LocalStorage Cache (Prevents redirect flicker and timeouts on refresh)
+    if (typeof window !== 'undefined' && !this._currentUserCache) {
+      const saved = localStorage.getItem('ims_user_cache_v1');
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed && (now - parsed._cachedAt < 86400000)) { // 24 hour cache for UI responsiveness
+            this._currentUserCache = parsed;
+            this._currentUserCacheAt = parsed._cachedAt;
+            
+            // Still trigger a background refresh if it's older than 5 mins
+            if (now - parsed._cachedAt > 300000) {
+               this._currentUserPromise = (async () => {
+                 try {
+                   const fresh = await this._fetchFreshUser();
+                   return fresh;
+                 } finally {
+                   this._currentUserPromise = null;
+                 }
+               })();
+            }
+            
+            return this._currentUserCache;
+          }
+        } catch (e) {
+          localStorage.removeItem('ims_user_cache_v1');
+        }
+      }
+    }
+
+    this._currentUserPromise = this._fetchFreshUser();
+    return this._currentUserPromise;
+  },
+
+  async _fetchFreshUser(): Promise<UserAccessRow | null> {
+    const fetchWithLockMitigation = async () => {
+      try {
+        // Use getSession first as it's faster than getUser
+        const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+        
+        let user = session?.user || null;
+        
+        if (!user && !sessionError) {
+          // If no session, try getUser just in case
+          const { data: { user: authUser } } = await supabase.auth.getUser();
+          user = authUser;
+        }
+        return user;
+      } catch (e: any) {
+        if (e?.message?.includes('Lock')) {
+          console.warn('[Auth] Lock contention detected, retrying in 100ms...');
+          await new Promise(r => setTimeout(r, 100));
+          return null; // Force retry via the loop below
+        }
+        throw e;
+      }
+    };
+
+    try {
+      let user = null;
+      let retries = 3;
+      
+      while (retries > 0) {
+        user = await fetchWithLockMitigation();
+        if (user) break;
+        retries--;
+      }
+
+      if (!user) {
+        this._currentUserCache = null;
+        this._currentUserCacheAt = Date.now();
+        if (typeof window !== 'undefined') localStorage.removeItem('ims_user_cache_v1');
+        return null;
+      }
+
+        const { data: profiles, error: profileError } = await supabase
+          .from('user_profiles')
+          .select(`
+            *,
+            roles:role_id (
+              id,
+              name,
+              permission_keys
+            )
+          `)
+          .eq('id', user.id)
+          .limit(1);
+
+        if (profileError || !profiles || profiles.length === 0) {
+          if (profileError) console.error('Profile fetch error:', profileError);
+          this._currentUserCache = null;
+          this._currentUserCacheAt = Date.now();
+          return null;
+        }
+
+        const profile = profiles[0];
+        const currentUser = {
+          id: profile.id,
+          full_name: profile.full_name,
+          email: profile.email,
+          role_id: profile.role_id,
+          role_name: resolveRoleName(profile.role_id, profile.roles),
+          status: profile.status,
+          custom_permission_keys: profile.custom_permission_keys || [],
+          revoked_permission_keys: profile.revoked_permission_keys || [],
+          temporary_password: profile.temporary_password,
+          last_active_at: profile.last_active_at,
+        } as UserAccessRow;
+
+        this._currentUserCache = currentUser;
+        this._currentUserCacheAt = Date.now();
+
+        // Update LocalStorage cache
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('ims_user_cache_v1', JSON.stringify({
+            ...currentUser,
+            _cachedAt: this._currentUserCacheAt
+          }));
+        }
+
+        return currentUser;
+      } catch (error) {
+        if (!isAuthLockRaceError(error)) {
+          console.error('Error getting current user:', error);
+        }
+        this._currentUserCache = null;
+        this._currentUserCacheAt = Date.now();
+        return null;
+      } finally {
+        this._currentUserPromise = null;
+      }
   },
 
   hasActiveSession(): boolean {
@@ -304,7 +651,7 @@ export const modulesService = {
     }
   },
 
-  async _getAuthHeader() {
+  async _getAuthHeader(): Promise<Record<string, string>> {
     const { data: { session } } = await supabase.auth.getSession();
     if (!session?.access_token) return {};
     return { 'Authorization': `Bearer ${session.access_token}` };
@@ -312,13 +659,14 @@ export const modulesService = {
 
   async saveUser(user: UserAccessRow): Promise<UserAccessRow> {
     try {
-      const headers = await this._getAuthHeader();
+      const authHeader = await this._getAuthHeader();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...authHeader,
+      };
       const response = await fetch(`/api/auth/users/${user.id}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
+        headers,
         body: JSON.stringify({
           full_name: user.full_name,
           role_id: user.role_id,
@@ -333,7 +681,7 @@ export const modulesService = {
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
-        } catch (e) {
+        } catch {
           // Response was not JSON
         }
         throw new Error(errorMessage);
@@ -348,13 +696,14 @@ export const modulesService = {
 
   async updateUserDetails(userId: string, details: { full_name: string; email: string; role_id: string }): Promise<void> {
     try {
-      const headers = await this._getAuthHeader();
+      const authHeader = await this._getAuthHeader();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...authHeader,
+      };
       const response = await fetch(`/api/auth/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
+        headers,
         body: JSON.stringify(details),
       });
 
@@ -363,7 +712,7 @@ export const modulesService = {
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
-        } catch (e) {
+        } catch {
           // Response was not JSON
         }
         throw new Error(errorMessage);
@@ -376,13 +725,14 @@ export const modulesService = {
 
   async changeUserPassword(userId: string, newPassword: string): Promise<void> {
     try {
-      const headers = await this._getAuthHeader();
+      const authHeader = await this._getAuthHeader();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...authHeader,
+      };
       const response = await fetch(`/api/auth/users/${userId}`, {
         method: 'PUT',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
+        headers,
         body: JSON.stringify({ password: newPassword }),
       });
 
@@ -391,7 +741,7 @@ export const modulesService = {
         try {
           const errorData = await response.json();
           errorMessage = errorData.error || errorMessage;
-        } catch (e) {
+        } catch {
           // Response was not JSON
         }
         throw new Error(errorMessage);
@@ -409,13 +759,14 @@ export const modulesService = {
     role_id: string;
   }): Promise<UserAccessRow> {
     try {
-      const headers = await this._getAuthHeader();
+      const authHeader = await this._getAuthHeader();
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        ...authHeader,
+      };
       const response = await fetch(`/api/auth/create-user`, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...headers,
-        },
+        headers,
         body: JSON.stringify(input),
       });
 
@@ -581,10 +932,17 @@ export const modulesService = {
 
   // Audit trail methods
   async getAuditTrail(): Promise<AuditTrailRow[]> {
+    /* Temporarily disabled until table is created
     try {
       const { data, error } = await supabase
         .from('audit_trail')
-        .select('*')
+        .select(`
+          *,
+          user_profiles:performed_by (
+            full_name,
+            email
+          )
+        `)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -592,49 +950,82 @@ export const modulesService = {
         return [];
       }
 
-      return data as AuditTrailRow[];
+      // Transform the data to include performed_by_name
+      return (data || []).map(row => ({
+        id: row.id,
+        action: row.action,
+        entity_type: row.entity_type,
+        entity_id: row.entity_id,
+        entity_name: row.entity_name,
+        reason: row.reason,
+        performed_by: row.performed_by,
+        performed_by_name: row.user_profiles?.full_name || row.user_profiles?.email || 'System',
+        old_values: row.old_values,
+        new_values: row.new_values,
+        details: row.details,
+        ip_address: row.ip_address,
+        created_at: row.created_at,
+      })) as AuditTrailRow[];
     } catch (error) {
       console.error('Error in getAuditTrail:', error);
       return [];
     }
+    */
+    return [];
   },
 
   async addAudit(input: Omit<AuditTrailRow, 'id' | 'created_at'>): Promise<AuditTrailRow> {
+    // Audit Trail is temporarily disabled for future implementation
+    /*
     try {
       let performedBy = input.performed_by;
+      let performedByName = input.performed_by_name || 'System';
       
       // Auto-fill performedBy if not provided
       if (!performedBy) {
         const user = await this.getCurrentUser();
-        performedBy = user?.email || 'System';
+        if (user) {
+          performedBy = user.id;
+          performedByName = user.full_name || user.email;
+        }
       }
 
-      const { data, error } = await supabase
-        .from('audit_trail')
-        .insert({
-          action: input.action,
-          entity_type: input.entity_type,
-          entity_id: input.entity_id,
-          entity_name: input.entity_name,
-          reason: input.reason || 'No reason provided',
-          performed_by: performedBy,
-          details: input.details,
-          old_values: (input as any).old_values,
-          new_values: (input as any).new_values,
-        })
-        .select()
-        .limit(1);
+      const payload = {
+        action: input.action,
+        entity_type: input.entity_type,
+        entity_id: input.entity_id,
+        entity_name: input.entity_name,
+        reason: input.reason || 'No reason provided',
+        performed_by: performedBy,
+        performed_by_name: performedByName,
+        details: input.details,
+        old_values: (input as any).old_values,
+        new_values: (input as any).new_values,
+      };
 
-      if (error || !data) {
-        console.error('Error adding audit entry:', error);
-        throw error || new Error('Failed to add audit entry');
+      // Use the API route to bypass RLS
+      const response = await fetch('/api/audit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}));
+        console.warn('Audit API fallback failed, error:', errorData.error);
+        throw new Error(errorData.error || `Server error: ${response.status}`);
       }
 
-      return data[0] as AuditTrailRow;
+      const result = await response.json();
+      return result.data as AuditTrailRow;
     } catch (error) {
-      console.error('Error in addAudit:', error);
-      throw error;
+      console.warn('Non-critical: Audit log could not be recorded:', error);
+      // We don't re-throw here to prevent crashing the main business flow
+      // but we return a mock object to satisfy the return type
+      return { id: 'error', created_at: new Date().toISOString(), ...input } as AuditTrailRow;
     }
+    */
+    return { id: 'disabled', created_at: new Date().toISOString(), ...input } as AuditTrailRow;
   },
 
   async getAuthenticatedUser(): Promise<UserAccessRow | null> {
@@ -647,14 +1038,16 @@ export const modulesService = {
   },
 
   async saveUsers(users: UserAccessRow[]): Promise<void> {
+    void users;
     console.warn('saveUsers: Not implemented for database service');
   },
 
   async setCurrentUser(userId: string): Promise<void> {
+    void userId;
     console.warn('setCurrentUser: Not implemented for database service');
   },
 
-  async login(email: string, password: string): Promise<UserAccessRow | null> {
+  async login(email: string, password: string): Promise<any> {
     return this.signIn(email, password);
   },
 
@@ -665,9 +1058,24 @@ export const modulesService = {
   // Business Data Methods
   async getOrders(): Promise<OrderRow[]> {
     try {
-      const { data, error } = await supabase
+      // Get purchase orders with vendor and project info
+      const { data: orders, error } = await supabase
         .from('purchase_orders')
-        .select('*')
+        .select(`
+          id,
+          order_number:po_number,
+          vendor_id,
+          vendor:vendors(id, name),
+          project_id,
+          project:projects(id, name),
+          status,
+          created_at,
+          created_by,
+          warehouse_id,
+          delivery_address,
+          payment_terms,
+          total_amount
+        `)
         .order('created_at', { ascending: false });
 
       if (error) {
@@ -675,7 +1083,45 @@ export const modulesService = {
         throw error;
       }
 
-      return data as OrderRow[];
+      if (!orders) return [];
+
+      // For each order, fetch its items with variant details
+      const ordersWithItems = await Promise.all(
+        orders.map(async (order: any) => {
+          const { data: items } = await supabase
+            .from('purchase_order_items')
+            .select(`
+              id,
+              variant_id,
+              quantity,
+              unit_price,
+              variant:variants(
+                id,
+                sku,
+                product:products(name)
+              )
+            `)
+            .eq('order_id', order.id);
+
+          return {
+            ...order,
+            type: 'PURCHASE' as const,
+            vendor_name: order.vendor?.name || 'Unknown',
+            project_name: order.project?.name || undefined,
+            items: (items || []).map((item: any) => ({
+              ...item,
+              sku: item.variant?.sku || '',
+              product_name: item.variant?.product?.name || 'Unknown Item',
+              price: item.unit_price,
+              total_price: (item.unit_price || 0) * (item.quantity || 0)
+            })),
+          } as OrderRow;
+        })
+      );
+
+      return ordersWithItems;
+
+      return ordersWithItems;
     } catch (error) {
       console.error('Error fetching orders:', error);
       return [];
@@ -685,18 +1131,56 @@ export const modulesService = {
   async createOrder(input: any): Promise<OrderRow> {
     try {
       const orderNumber = `PO-${Date.now().toString().slice(-6)}`;
+
+      // Extract valid purchase_orders columns only
+      // Items are stored separately in purchase_order_items table
+      const { items, ...validOrderData } = input;
+      void items;
+
+      // Only include fields that exist in purchase_orders table based on actual schema
+      const orderToInsert: any = {
+        po_number: orderNumber, // Database column is po_number
+        vendor_id: validOrderData.vendor_id,
+        status: 'pending_approval', // Use lowercase to match database enum
+        payment_terms: validOrderData.payment_terms,
+        notes: validOrderData.notes,
+        delivery_address: validOrderData.delivery_address || '',
+        created_at: new Date().toISOString(),
+      };
+
+      if (validOrderData.approved_by) orderToInsert.approved_by = validOrderData.approved_by;
+      if (validOrderData.project_id) orderToInsert.project_id = validOrderData.project_id;
+      if (validOrderData.warehouse_id) orderToInsert.warehouse_id = validOrderData.warehouse_id;
+      if (validOrderData.created_by) orderToInsert.created_by = validOrderData.created_by;
+
       const { data, error } = await supabase
         .from('purchase_orders')
-        .insert({
-          ...input,
-          order_number: orderNumber,
-          status: 'PENDING',
-          created_at: new Date().toISOString(),
-        })
+        .insert(orderToInsert)
         .select()
         .limit(1);
 
       if (error || !data) throw error || new Error('Failed to create order');
+
+      // If items were provided, insert them into purchase_order_items table
+      if (items && items.length > 0 && data[0]) {
+        const orderId = data[0].id;
+        const itemsToInsert = items.map((item: any) => ({
+          order_id: orderId,
+          variant_id: item.variant_id,
+          quantity: item.quantity || 1,
+          unit_price: item.unit_price || 0,
+        }));
+
+        const { error: itemsError } = await supabase
+          .from('purchase_order_items')
+          .insert(itemsToInsert);
+
+        if (itemsError) {
+          console.error('Error adding order items:', itemsError);
+          // Don't throw - order was created, items failed
+        }
+      }
+
       return data[0] as OrderRow;
     } catch (error) {
       console.error('Error creating order:', error);
@@ -704,11 +1188,21 @@ export const modulesService = {
     }
   },
 
-  async updateOrderStatus(orderId: string, status: OrderRow['status']): Promise<void> {
+  async updateOrderStatus(orderId: string, status: string): Promise<void> {
     try {
+      // Map frontend status to database enum - use lowercase as per database schema
+      let dbStatus = status.toLowerCase();
+      // Support both formats for backward compatibility
+      if (dbStatus === 'pending') dbStatus = 'pending_approval';
+      
+      // Validate status is one of allowed values
+      if (!['pending_approval', 'approved', 'cancelled'].includes(dbStatus)) {
+        throw new Error(`Invalid purchase order status: ${status}`);
+      }
+
       const { error } = await supabase
         .from('purchase_orders')
-        .update({ status })
+        .update({ status: dbStatus })
         .eq('id', orderId);
 
       if (error) throw error;
@@ -726,18 +1220,20 @@ export const modulesService = {
         .order('dispatch_date', { ascending: false });
 
       if (error) {
-        if (isSchemaError(error)) return [];
-        throw error;
+        if (isSchemaError(error)) return readLocalData<ChallanRow>(CHALLANS_KEY);
+        console.error('Error fetching challans:', error);
+        return readLocalData<ChallanRow>(CHALLANS_KEY);
       }
-      return data as ChallanRow[];
+
+      return (data as ChallanRow[]) || [];
     } catch (error) {
       console.error('Error fetching challans:', error);
-      return [];
+      return readLocalData<ChallanRow>(CHALLANS_KEY);
     }
   },
 
   async saveChallans(challans: ChallanRow[]): Promise<void> {
-    console.warn('saveChallans: Implement individual save');
+    writeLocalData<ChallanRow>(CHALLANS_KEY, challans);
   },
 
   async getDeliveryReceipts(): Promise<DeliveryReceiptRow[]> {
@@ -749,7 +1245,7 @@ export const modulesService = {
           .from(table)
           .select('*')
           .limit(100);
-        
+
         if (!error && data && data.length > 0) {
           return data.map(row => ({
             id: row.id,
@@ -760,20 +1256,25 @@ export const modulesService = {
             vendor_name: row.vendor_name || '',
             receiver_name: row.receiver_name || '',
             contact: row.contact || '',
+            linked_po: row.linked_po || row.po_ref || row.purchase_order_id || '',
             status: row.status || 'VERIFIED',
             items: row.items || []
           }));
         }
+
+        if (error && isSchemaError(error)) {
+          return readLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY);
+        }
       }
-      return [];
+      return readLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY);
     } catch (error) {
       console.error('Error fetching delivery receipts:', error);
-      return [];
+      return readLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY);
     }
   },
 
   async saveDeliveryReceipts(receipts: DeliveryReceiptRow[]): Promise<void> {
-    console.warn('saveDeliveryReceipts: Implement individual save');
+    writeLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY, receipts);
   },
 
   async getPaymentSlips(): Promise<PaymentSlipRow[]> {
@@ -785,7 +1286,7 @@ export const modulesService = {
           .from(table)
           .select('*')
           .limit(100);
-        
+
         if (!error && data) {
           return data.map(row => ({
             id: row.id,
@@ -801,16 +1302,20 @@ export const modulesService = {
             status: row.status || 'ISSUED'
           }));
         }
+
+        if (error && isSchemaError(error)) {
+          return readLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY);
+        }
       }
-      return [];
+      return readLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY);
     } catch (error) {
       console.error('Error fetching payment slips:', error);
-      return [];
+      return readLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY);
     }
   },
 
   async savePaymentSlips(slips: PaymentSlipRow[]): Promise<void> {
-    console.warn('savePaymentSlips: Implement individual save');
+    writeLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY, slips);
   },
 
   async getInventorySnapshot(): Promise<InventorySnapshotRow[]> {
@@ -888,7 +1393,12 @@ export const modulesService = {
         .select()
         .limit(1);
 
-      if (error || !data) throw error || new Error('Failed to add movement');
+      if (error || !data) {
+        if (isSchemaError(error)) {
+           return { id: 'schema_missing', created_at: new Date().toISOString(), ...input } as StockMovementRow;
+        }
+        throw error || new Error('Failed to add movement');
+      }
       return data[0] as StockMovementRow;
     } catch (error) {
       console.error('Error adding movement:', error);

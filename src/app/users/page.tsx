@@ -7,9 +7,7 @@ import {
   Lock,
   Plus,
   Search,
-  Shield,
   ShieldCheck,
-  UserCog,
   UserPlus,
   Settings,
   X,
@@ -72,14 +70,14 @@ function groupPermissions(permissions: PermissionRow[]) {
 }
 
 export default function UsersPage() {
-  const { showToast, confirmAction } = useUi();
+  const { showToast } = useUi();
   const [activeTab, setActiveTab] = React.useState<'users' | 'roles'>('users');
   const [users, setUsers] = React.useState<UserAccessRow[]>([]);
   const [roles, setRoles] = React.useState<RoleRow[]>([]);
   const [selectedRoleId, setSelectedRoleId] = React.useState('');
   const [search, setSearch] = React.useState('');
   const [roleFilter, setRoleFilter] = React.useState('ALL');
-  const [statusFilter, setStatusFilter] = React.useState<'ALL' | UserAccessRow['status']>('ALL');
+  const [statusFilter] = React.useState<'ALL' | UserAccessRow['status']>('ALL');
   const [page, setPage] = React.useState(1);
   const [pageSize, setPageSize] = React.useState(10);
 
@@ -88,7 +86,7 @@ export default function UsersPage() {
   const [editUserModal, setEditUserModal] = React.useState<UserAccessRow | null>(null);
   const [passwordModal, setPasswordModal] = React.useState<UserAccessRow | null>(null);
   const [userPermissionEditor, setUserPermissionEditor] = React.useState<UserAccessRow | null>(null);
-  const [newRoleOpen, setNewRoleOpen] = React.useState(false);
+  const [, setNewRoleOpen] = React.useState(false);
 
   const [userForm, setUserForm] = React.useState<UserFormState>({
     full_name: '',
@@ -275,7 +273,7 @@ export default function UsersPage() {
       await modulesService.saveUser({ ...user, status: nextStatus });
       await syncData();
       showToast(`User ${nextStatus === 'ACTIVE' ? 'enabled' : 'disabled'}.`, 'success');
-    } catch (error) {
+    } catch {
       showToast('Failed to change status.', 'error');
     }
   }
@@ -290,23 +288,8 @@ export default function UsersPage() {
       });
       await syncData();
       showToast('Role permissions updated.', 'success');
-    } catch (error) {
+    } catch {
       showToast('Failed to update role.', 'error');
-    }
-  }
-
-  async function createRole() {
-    if (!roleForm.name.trim()) return;
-    try {
-      await modulesService.createRole({
-        name: roleForm.name,
-        permission_keys: roleForm.permission_keys,
-      });
-      await syncData();
-      setNewRoleOpen(false);
-      showToast('New role created.', 'success');
-    } catch (error) {
-      showToast('Failed to create role.', 'error');
     }
   }
 
@@ -349,7 +332,7 @@ export default function UsersPage() {
       await syncData();
       setUserPermissionEditor(nextUser);
       showToast('User permission updated.', 'success');
-    } catch (error) {
+    } catch {
       showToast('Failed to update permission.', 'error');
     }
   }

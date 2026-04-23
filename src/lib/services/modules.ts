@@ -2,18 +2,6 @@
 // This is a wrapper around the database service for backward compatibility
 
 import { modulesService as dbService } from './modules-database';
-import type {
-  UserAccessRow,
-  RoleRow,
-  AuditTrailRow,
-  PermissionRow,
-  InventorySnapshotRow,
-  OrderRow,
-  StockMovementRow,
-  ChallanRow,
-  DeliveryReceiptRow,
-  PaymentSlipRow,
-} from '@/types/modules';
 
 /**
  * Backward compatibility wrapper for the modules service.

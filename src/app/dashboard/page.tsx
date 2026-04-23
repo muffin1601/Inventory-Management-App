@@ -213,8 +213,8 @@ export default function Dashboard() {
           }))
           .slice(0, 5);
 
-        const pendingOrderCount = orders.filter((order) => order.status === "PENDING").length;
-        const approvedOrderCount = orders.filter((order) => order.status === "APPROVED").length;
+        const pendingOrderCount = orders.filter((order) => order.status === "pending_approval").length;
+        const approvedOrderCount = orders.filter((order) => order.status === "approved").length;
 
         const warehouseMap = new Map<string, { warehouse: string; quantity: number; value: number }>();
         snapshot.forEach((row) => {

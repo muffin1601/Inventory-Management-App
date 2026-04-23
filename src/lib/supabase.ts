@@ -5,7 +5,15 @@ const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
 const supabaseServiceKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 // Client-side Supabase client (for user operations)
-export const supabase = createClient(supabaseUrl, supabaseAnonKey);
+// Configure with proper session management
+export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
+  auth: {
+    autoRefreshToken: true,
+    persistSession: true,
+    detectSessionInUrl: true,
+    storage: typeof window !== 'undefined' ? window.localStorage : undefined,
+  },
+});
 
 // Server-side Supabase client with service role (for admin operations)
 // This should only be used in server-side code or secure contexts

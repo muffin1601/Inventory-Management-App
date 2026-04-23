@@ -43,6 +43,7 @@ export default function ProjectBoqPage() {
   const [extraItemOptions, setExtraItemOptions] = React.useState<Array<{ value: string; label: string; keywords?: string[] }>>([]);
   const [catalogMeta, setCatalogMeta] = React.useState<Record<string, { name: string; manufacturer: string; unit: string; label: string; stock: number }>>({});
   const [selectedVariantStock, setSelectedVariantStock] = React.useState<number | null>(null);
+  const [nameToMeta, setNameToMeta] = React.useState(new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string }>());
   const [units, setUnits] = React.useState<string[]>([DEFAULT_UNIT]);
 
   const load = React.useCallback(async () => {
@@ -75,6 +76,7 @@ export default function ProjectBoqPage() {
       const [products, unitList] = await Promise.all([inventoryService.getProducts(), inventoryService.getUnits()]);
       setUnits(unitList.length ? unitList : [DEFAULT_UNIT]);
 
+      const nameToMeta = new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string }>();
       const meta: Record<string, { name: string; manufacturer: string; unit: string; label: string; stock: number }> = {};
       const options: Array<{ value: string; label: string; keywords?: string[] }> = [];
 
@@ -85,10 +87,22 @@ export default function ProjectBoqPage() {
           const variantId = String(variant?.id || '').trim();
           if (!variantId) return;
           const sku = String(variant?.sku || '').trim();
-          const variantUnit = String(variant?.attributes?.Unit || '').trim();
+          
+          // Case-insensitive unit lookup
+          const variantUnit = String(variant?.attributes?.Unit || variant?.attributes?.unit || variant?.attributes?.UNIT || '').trim();
+          
           const label = productName && sku ? `${productName} (${sku})` : productName || sku || 'Item';
           const stock = Number.isFinite(Number(variant?.total_stock)) ? Number(variant.total_stock) : 0;
-          meta[variantId] = { name: productName || sku || 'Item', manufacturer: brand, unit: variantUnit || '', label, stock };
+          
+          const metaEntry = { name: productName || sku || 'Item', manufacturer: brand, unit: variantUnit || '', label, stock };
+          meta[variantId] = metaEntry;
+          
+          // Store by label and name for auto-fill lookups
+          nameToMeta.set(label.toLowerCase(), { manufacturer: brand, unit: variantUnit, stock, variantId });
+          if (productName) {
+            nameToMeta.set(productName.toLowerCase(), { manufacturer: brand, unit: variantUnit, stock, variantId });
+          }
+
           options.push({
             value: variantId,
             label,
@@ -101,6 +115,7 @@ export default function ProjectBoqPage() {
       options.forEach((opt) => unique.set(opt.value, opt));
 
       setCatalogMeta(meta);
+      setNameToMeta(nameToMeta);
       setCatalogOptions(Array.from(unique.values()));
     } catch (err) {
       console.error(err);
@@ -176,7 +191,7 @@ export default function ProjectBoqPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [itemName, load, manufacturer, projectId, qty, selectedVariantId, ui, unit]);
+  }, [itemName, load, manufacturer, projectId, qty, selectedVariantId, selectedVariantStock, ui, unit]);
 
   const deleteItem = React.useCallback(
     async (boqItem: BoqItemRecord) => {
@@ -328,14 +343,24 @@ export default function ProjectBoqPage() {
                         setSelectedVariantStock(meta.stock);
                         setItemName(meta.label);
                         if (meta.manufacturer) setManufacturer(meta.manufacturer);
-                        setUnit(meta.unit || DEFAULT_UNIT);
+                        if (meta.unit) setUnit(meta.unit);
                         return;
                       }
-                      setSelectedVariantId('');
-                      setSelectedVariantStock(null);
+                      
+                      // Custom option lookup
                       const custom = itemOptions.find((opt) => opt.value === value);
                       if (custom?.label) {
-                        setItemName(custom.label);
+                        const label = custom.label;
+                        setItemName(label);
+                        
+                        // Try to auto-fill based on name if not already filled
+                        const lookup = nameToMeta.get(label.toLowerCase());
+                        if (lookup) {
+                          if (!manufacturer && lookup.manufacturer) setManufacturer(lookup.manufacturer);
+                          if ((unit === DEFAULT_UNIT || !unit) && lookup.unit) setUnit(lookup.unit);
+                          if (lookup.variantId) setSelectedVariantId(lookup.variantId);
+                          if (lookup.stock !== undefined) setSelectedVariantStock(lookup.stock);
+                        }
                       }
                     }}
                   />
@@ -346,6 +371,18 @@ export default function ProjectBoqPage() {
                     className={styles.input}
                     value={itemName}
                     onChange={(e) => setItemName(e.target.value)}
+                    onBlur={(e) => {
+                      const val = e.target.value.trim();
+                      if (!val) return;
+                      // Try auto-fill on blur if fields are empty
+                      const lookup = nameToMeta.get(val.toLowerCase());
+                      if (lookup) {
+                        if (!manufacturer && lookup.manufacturer) setManufacturer(lookup.manufacturer);
+                        if ((unit === DEFAULT_UNIT || !unit) && lookup.unit) setUnit(lookup.unit);
+                        if (!selectedVariantId && lookup.variantId) setSelectedVariantId(lookup.variantId);
+                        if (selectedVariantStock === null && lookup.stock !== undefined) setSelectedVariantStock(lookup.stock);
+                      }
+                    }}
                     placeholder="Enter item name"
                   />
                 </div>

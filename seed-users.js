@@ -73,7 +73,7 @@ async function findUserIdByEmail(supabaseAdmin, email) {
       .limit(1);
 
     if (!error && Array.isArray(rows) && rows[0]?.id) return rows[0].id;
-  } catch (e) {
+  } catch {
     // Some PostgREST errors can throw (e.g., network/proxy issues).
     // We'll fall back to listing auth users instead of failing the entire seed.
   }

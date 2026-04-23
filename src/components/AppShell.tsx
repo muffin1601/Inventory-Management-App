@@ -5,7 +5,9 @@ import { usePathname, useRouter } from 'next/navigation';
 import Sidebar from './Sidebar';
 import Header from './Header';
 import Footer from './Footer';
+import { LoadingPage } from './LoadingPage';
 import styles from './Layout.module.css';
+import { useAuth } from '@/lib/AuthContext';
 import { modulesService } from '@/lib/services/modules';
 
 const SIDEBAR_STATE_KEY = 'ims_sidebar_collapsed_v1';
@@ -14,10 +16,10 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const [collapsed, setCollapsed] = React.useState(false);
   const pathname = usePathname();
   const router = useRouter();
-  const isLoginRoute = pathname === '/login';
-  const [hasSession, setHasSession] = React.useState(false);
+  const { user, isLoading, isClient } = useAuth();
   const [canAccessRoute, setCanAccessRoute] = React.useState(false);
-  const [isClient, setIsClient] = React.useState(false);
+
+  const isLoginRoute = pathname === '/login';
 
   React.useEffect(() => {
     const saved = window.localStorage.getItem(SIDEBAR_STATE_KEY);
@@ -26,65 +28,52 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Consolidate auth and permission checks
+  // Check route access when user or pathname changes
   React.useEffect(() => {
     let mounted = true;
+    const checkRouteAccess = async () => {
+      if (!isClient) return;
 
-    const checkAccess = async () => {
-      // First check session
-      const authenticatedUser = await modulesService.getAuthenticatedUser();
-      if (!mounted) return;
+      console.log('[AppShell] Checking route access', { user: user?.email, pathname });
 
-      const sessionActive = Boolean(authenticatedUser);
-      setHasSession(sessionActive);
+      if (user && !isLoginRoute) {
+        try {
+          const accessPromise = modulesService.canAccessRoute(user, pathname);
+          const timeoutPromise = new Promise<boolean>((resolve) => {
+            setTimeout(() => {
+              resolve(true); // Fail open if the permission check takes too long
+            }, 15000);
+          });
 
-      if (sessionActive && authenticatedUser) {
-        // Check route access
-        const routeAccess = await modulesService.canAccessRoute(authenticatedUser, pathname);
-        if (!mounted) return;
-
-        // DEBUG LOGGING
-        const allRoles = await modulesService.getRoles();
-        console.log('[AppShell] Permission Check:', {
-          pathname,
-          user: authenticatedUser.email,
-          role: authenticatedUser.role_id,
-          routePermission: modulesService.getRoutePermission(pathname),
-          canAccess: routeAccess,
-          availableRoles: allRoles.map(r => r.id),
-        });
-
-        setCanAccessRoute(routeAccess);
+          const routeAccess = await Promise.race([accessPromise, timeoutPromise]);
+          if (mounted) {
+            setCanAccessRoute(routeAccess);
+          }
+        } catch (error) {
+          console.error('[AppShell] Error checking route access:', error);
+          if (mounted) setCanAccessRoute(false);
+        }
       } else {
-        setCanAccessRoute(false);
+        if (mounted) setCanAccessRoute(false);
       }
-      
-      setIsClient(true);
     };
 
-    checkAccess();
+    checkRouteAccess();
+    return () => { mounted = false; };
+  }, [user, pathname, isClient, isLoginRoute]);
 
-    const handleAuthChange = () => checkAccess();
-    window.addEventListener('ims-auth-changed', handleAuthChange);
-    window.addEventListener('ims-current-user-changed', handleAuthChange);
-    
-    return () => {
-      mounted = false;
-      window.removeEventListener('ims-auth-changed', handleAuthChange);
-      window.removeEventListener('ims-current-user-changed', handleAuthChange);
-    };
-  }, [pathname]);
-
+  // Handle navigation based on auth state
   React.useEffect(() => {
-    if (!hasSession && !isLoginRoute) {
-      router.replace('/login');
-      return;
+    if (!isLoading && isClient) {
+      if (!user && !isLoginRoute) {
+        // User is not logged in and not on login route - redirect to login
+        router.replace('/login');
+      } else if (user && isLoginRoute) {
+        // User is logged in and on login route - redirect to dashboard
+        router.replace('/dashboard');
+      }
     }
-
-    if (hasSession && isLoginRoute) {
-      router.replace('/dashboard');
-    }
-  }, [hasSession, isLoginRoute, router]);
+  }, [user, isLoading, isLoginRoute, router, isClient]);
 
   const toggleSidebar = React.useCallback(() => {
     setCollapsed((previous) => {
@@ -93,6 +82,11 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       return next;
     });
   }, []);
+
+  // Show loading state while auth is initializing
+  if (!isClient || isLoading) {
+    return <LoadingPage />;
+  }
 
   return (
     isLoginRoute ? (
@@ -105,12 +99,7 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
       <main className={`${styles.main} ${collapsed ? styles.mainCollapsed : ''}`}>
         <Header />
         <div className={styles.pageContent}>
-          {!isClient ? (
-            // Show loading state during SSR to prevent hydration mismatch
-            <div className={styles.loadingState}>
-              <div>Loading...</div>
-            </div>
-          ) : canAccessRoute ? (
+          {canAccessRoute ? (
             children
           ) : (
             <div className={styles.accessDenied}>

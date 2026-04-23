@@ -43,20 +43,22 @@ export default function LoginPage() {
     setError('');
 
     try {
-      const user = await modulesService.login(email, password);
+      const result = await modulesService.login(email, password);
       
-      if (!user) {
+      if (!result || !result.user) {
         setAttempts(prev => prev + 1);
+        // Use error message from response, or generic message
+        const errorMsg = result?.error?.message || 'Invalid email or password.';
         setError(isLocked 
           ? 'Account temporarily locked due to multiple failed attempts.' 
-          : `Invalid email or password. (Attempt ${attempts + 1}/5)`
+          : `${errorMsg} (Attempt ${attempts + 1}/5)`
         );
         setState('error');
         return;
       }
 
       // Check if password needs to be changed
-      if (user.requires_password_change) {
+      if (result.user.requires_password_change) {
         // Redirect to password change page
         router.replace('/auth/change-password');
         return;
@@ -70,7 +72,7 @@ export default function LoginPage() {
       setTimeout(() => {
         router.replace('/dashboard');
       }, 500);
-    } catch (err) {
+    } catch {
       setError('An unexpected error occurred. Please try again.');
       setState('error');
     }

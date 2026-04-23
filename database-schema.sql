@@ -96,6 +96,7 @@ CREATE TABLE public.audit_trail (
   entity_name TEXT,
   reason TEXT,
   performed_by UUID REFERENCES public.user_profiles(id) ON DELETE SET NULL,
+  performed_by_name TEXT, -- Store the user's name/email for display
   old_values JSONB,
   new_values JSONB,
   details TEXT,

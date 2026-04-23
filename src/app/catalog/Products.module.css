@@ -783,9 +783,10 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-top: 0.75rem;
-  padding-top: 0.6rem;
+  margin-top: 1.5rem;
+  padding-top: 1rem;
   border-top: 1px solid var(--border-color);
+  grid-column: 1 / -1;
 }
 
 .leftActions {
@@ -983,6 +984,25 @@
   border-radius: 0;
 }
 
+.captureBtn {
+  background: rgba(15, 23, 42, 0.05);
+  color: var(--text-primary);
+  padding: 0.42rem 1.15rem;
+  font-weight: 600;
+  font-size: 0.8rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border: 1px solid var(--border-color);
+  transition: all 0.2s;
+}
+
+.captureBtn:hover {
+  background: var(--accent-primary);
+  color: white;
+  border-color: var(--accent-primary);
+}
+
 .deleteReasonArea:focus {
   border-color: var(--danger);
   box-shadow: 0 0 0 2px rgba(220, 38, 38, 0.12);
@@ -1115,18 +1135,18 @@
 
 .wizardContainer {
   display: grid;
-  grid-template-columns: 230px 1fr;
-  gap: 1rem;
-  min-height: auto;
-  padding: 0.25rem 0.5rem 1rem;
+  grid-template-columns: 240px 1fr;
+  gap: 2rem;
+  min-height: 500px;
+  padding: 1rem 0;
 }
 
 .verticalSidebar {
   display: flex;
   flex-direction: column;
-  gap: 0;
+  gap: 0.5rem;
   border-right: 1px solid #f1f5f9;
-  padding-right: 1rem;
+  padding-right: 2rem;
 }
 
 .vertStep {
@@ -1198,7 +1218,8 @@
 
 .wizardContentArea {
   flex: 1;
-  max-width: 860px;
+  max-width: 900px;
+  padding-top: 0.5rem;
 }
 
 .genHeader {
