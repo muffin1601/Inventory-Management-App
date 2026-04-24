@@ -347,7 +347,7 @@ export const modulesService = {
         .limit(1);
 
       // If join fails (e.g. 403 on roles table), retry without join
-      if (profileError && (profileError.code === '403' || profileError.status === 403)) {
+      if (profileError && (profileError.code === '403' || (profileError as any).status === 403)) {
         console.warn('[Auth] Role join failed in signIn (403), fetching profile without join');
         const { data: simpleProfiles, error: simpleError } = await supabase
           .from('user_profiles')
@@ -595,7 +595,7 @@ export const modulesService = {
           .limit(1);
 
         // If join fails (e.g. 403 on roles table), retry without join
-        if (profileError && (profileError.code === '403' || profileError.status === 403)) {
+        if (profileError && (profileError.code === '403' || (profileError as any).status === 403)) {
           console.warn('[Auth] Role join failed (403), fetching profile without join');
           const { data: simpleProfiles, error: simpleError } = await supabase
             .from('user_profiles')
