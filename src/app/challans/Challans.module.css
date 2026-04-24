@@ -41,7 +41,7 @@
   color: white;
   border: none;
   padding: 0.5rem 1rem;
-  font-weight: 700;
+  font-weight: 500;
   display: flex;
   align-items: center;
   gap: 0.35rem;
@@ -73,7 +73,7 @@
 
 .statLabel {
   font-size: 0.7rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-muted);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -137,6 +137,12 @@
   border-radius: 0;
   outline: none;
   min-width: 140px;
+  color: var(--text-main);
+}
+
+.select:focus {
+  border-color: var(--text-main);
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1);
 }
 
 .table {
@@ -150,7 +156,7 @@
   background: #f8fafc;
   color: #475569;
   font-size: 0.7rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   border-bottom: 2px solid var(--border-light);
 }
@@ -173,7 +179,7 @@
 .statusBadge {
   padding: 0.18rem 0.5rem;
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   border-radius: 0;
   display: inline-flex;
@@ -197,12 +203,12 @@
   justify-content: center;
   gap: 0.25rem;
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .actionBtn:hover {
-  color: var(--accent-blue);
+  color: var(--text-main);
   background: #f1f5f9;
 }
 
@@ -268,7 +274,7 @@
 
 .fieldLabel {
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-muted);
   text-transform: uppercase;
 }
@@ -281,8 +287,8 @@
 }
 
 .input:focus {
-  border-color: var(--accent-blue);
-  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.1);
+  border-color: var(--text-main);
+  box-shadow: 0 0 0 2px rgba(15, 23, 42, 0.1);
 }
 
 .itemSelection {
@@ -296,7 +302,7 @@
   display: grid;
   grid-template-columns: 2fr 1fr 1fr 1fr;
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   color: #475569;
 }

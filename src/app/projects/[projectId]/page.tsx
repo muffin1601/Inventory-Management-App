@@ -38,13 +38,22 @@ export default function ProjectBoqPage() {
   const [unit, setUnit] = React.useState(DEFAULT_UNIT);
   const [qty, setQty] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
-
   const [catalogOptions, setCatalogOptions] = React.useState<Array<{ value: string; label: string; keywords?: string[] }>>([]);
   const [extraItemOptions, setExtraItemOptions] = React.useState<Array<{ value: string; label: string; keywords?: string[] }>>([]);
-  const [catalogMeta, setCatalogMeta] = React.useState<Record<string, { name: string; manufacturer: string; unit: string; label: string; stock: number }>>({});
+
+  const [catalogMeta, setCatalogMeta] = React.useState<Record<string, { 
+    name: string; 
+    manufacturer: string; 
+    unit: string; 
+    label: string; 
+    stock: number;
+    stock_data?: Array<{ warehouse_name: string; quantity: number }>;
+  }>>({});
   const [selectedVariantStock, setSelectedVariantStock] = React.useState<number | null>(null);
-  const [nameToMeta, setNameToMeta] = React.useState(new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string }>());
+  const [nameToMeta, setNameToMeta] = React.useState(new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string; stock_data?: any[] }>());
   const [units, setUnits] = React.useState<string[]>([DEFAULT_UNIT]);
+  const [warehouses, setWarehouses] = React.useState<Array<{ id: string; name: string }>>([]);
+  const [selectedWarehouseId, setSelectedWarehouseId] = React.useState('');
 
   const load = React.useCallback(async () => {
     setIsLoading(true);
@@ -73,8 +82,13 @@ export default function ProjectBoqPage() {
 
   const loadCatalogAndUnits = React.useCallback(async () => {
     try {
-      const [products, unitList] = await Promise.all([inventoryService.getProducts(), inventoryService.getUnits()]);
+      const [products, unitList, warehouseList] = await Promise.all([
+        inventoryService.getProducts(), 
+        inventoryService.getUnits(),
+        inventoryService.getWarehouses()
+      ]);
       setUnits(unitList.length ? unitList : [DEFAULT_UNIT]);
+      setWarehouses(warehouseList);
 
       const nameToMeta = new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string }>();
       const meta: Record<string, { name: string; manufacturer: string; unit: string; label: string; stock: number }> = {};
@@ -93,14 +107,15 @@ export default function ProjectBoqPage() {
           
           const label = productName && sku ? `${productName} (${sku})` : productName || sku || 'Item';
           const stock = Number.isFinite(Number(variant?.total_stock)) ? Number(variant.total_stock) : 0;
+          const stock_data = variant?.stock_data || [];
           
-          const metaEntry = { name: productName || sku || 'Item', manufacturer: brand, unit: variantUnit || '', label, stock };
+          const metaEntry = { name: productName || sku || 'Item', manufacturer: brand, unit: variantUnit || '', label, stock, stock_data };
           meta[variantId] = metaEntry;
           
           // Store by label and name for auto-fill lookups
-          nameToMeta.set(label.toLowerCase(), { manufacturer: brand, unit: variantUnit, stock, variantId });
+          nameToMeta.set(label.toLowerCase(), { manufacturer: brand, unit: variantUnit, stock, variantId, stock_data });
           if (productName) {
-            nameToMeta.set(productName.toLowerCase(), { manufacturer: brand, unit: variantUnit, stock, variantId });
+            nameToMeta.set(productName.toLowerCase(), { manufacturer: brand, unit: variantUnit, stock, variantId, stock_data });
           }
 
           options.push({
@@ -130,6 +145,7 @@ export default function ProjectBoqPage() {
   const openAdd = React.useCallback(() => {
     setExistingItemValue('');
     setSelectedVariantId('');
+    setSelectedWarehouseId('');
     setItemName('');
     setManufacturer('');
     setUnit(DEFAULT_UNIT);
@@ -157,25 +173,16 @@ export default function ProjectBoqPage() {
       return;
     }
 
-    if (selectedVariantStock !== null) {
-      if (selectedVariantStock === 0) {
-        ui.showToast('The selected item is out of stock.', 'error');
-        return;
-      }
-      if (parsedQty > selectedVariantStock) {
-        ui.showToast(
-          `Only ${selectedVariantStock} units are available in stock. Please reduce the quantity or select another item.`,
-          'error',
-        );
-        return;
-      }
-    }
+    // Validation for stock removed to allow planning BOQ items even when out of stock.
+    // They will appear as "Promised" in stock management to indicate future requirements.
+
 
     setIsSaving(true);
     try {
         await projectsService.addBoqItem({
         projectId,
         variant_id: selectedVariantId || undefined,
+        warehouse_id: selectedWarehouseId || undefined,
         item_name: name,
         manufacturer: manufacturer.trim() || undefined,
         quantity: parsedQty,
@@ -321,20 +328,11 @@ export default function ProjectBoqPage() {
                 <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
                   <label className={styles.label}>Select Existing Item (or type new)</label>
                   <SearchableSelect
-                    placeholder="Select item..."
+                    placeholder="Select item from catalog..."
                     searchPlaceholder="Type to search..."
-                    addActionLabel="Use new"
-                    emptyText="No matching items"
+                    emptyText="No matching items in catalog"
                     value={existingItemValue}
                     options={itemOptions}
-                                  onCreateOption={(value) => {
-                      const trimmed = value.trim();
-                      if (!trimmed) return;
-                      const createdValue = `custom_${trimmed.toLowerCase().replace(/\s+/g, '_')}_${Math.random().toString(36).slice(2, 6)}`;
-                      setExtraItemOptions((prev) => [{ value: createdValue, label: trimmed, keywords: [trimmed] }, ...prev]);
-                      setSelectedVariantId('');
-                      return createdValue;
-                    }}
                     onChange={(value) => {
                       setExistingItemValue(value);
                       const meta = catalogMeta[value];
@@ -365,34 +363,15 @@ export default function ProjectBoqPage() {
                     }}
                   />
                 </div>
+
                 <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
-                  <label className={styles.label}>Item Name *</label>
-                  <input
-                    className={styles.input}
-                    value={itemName}
-                    onChange={(e) => setItemName(e.target.value)}
-                    onBlur={(e) => {
-                      const val = e.target.value.trim();
-                      if (!val) return;
-                      // Try auto-fill on blur if fields are empty
-                      const lookup = nameToMeta.get(val.toLowerCase());
-                      if (lookup) {
-                        if (!manufacturer && lookup.manufacturer) setManufacturer(lookup.manufacturer);
-                        if ((unit === DEFAULT_UNIT || !unit) && lookup.unit) setUnit(lookup.unit);
-                        if (!selectedVariantId && lookup.variantId) setSelectedVariantId(lookup.variantId);
-                        if (selectedVariantStock === null && lookup.stock !== undefined) setSelectedVariantStock(lookup.stock);
-                      }
-                    }}
-                    placeholder="Enter item name"
-                  />
-                </div>
-                <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
-                  <label className={styles.label}>Manufacturers (comma-separated)</label>
-                  <input
-                    className={styles.input}
-                    value={manufacturer}
-                    onChange={(e) => setManufacturer(e.target.value)}
-                    placeholder="e.g., Wibi, Supreme"
+                  <label className={styles.label}>Warehouse (Optional: specify which warehouse will fulfill this)</label>
+                  <SearchableSelect
+                    placeholder="Select warehouse (Optional)..."
+                    searchPlaceholder="Search warehouse..."
+                    value={selectedWarehouseId}
+                    options={warehouses.map(w => ({ value: w.id, label: w.name, keywords: [w.name] }))}
+                    onChange={setSelectedWarehouseId}
                   />
                 </div>
                 <div className={styles.field}>
@@ -416,9 +395,23 @@ export default function ProjectBoqPage() {
                 <div className={styles.field}>
                   <label className={styles.label}>Quantity *</label>
                   <input className={styles.input} value={qty} onChange={(e) => setQty(e.target.value)} placeholder="0" />
-                  {selectedVariantStock !== null ? (
-                    <div className={styles.stockNote}>
-                      {selectedVariantStock > 0 ? `Stock available: ${selectedVariantStock}` : 'Out of stock'}
+                  {selectedVariantId && catalogMeta[selectedVariantId] ? (
+                    <div className={styles.stockBreakdown}>
+                      <div className={styles.stockTotal}>
+                        Total Stock: <strong>{catalogMeta[selectedVariantId].stock}</strong>
+                      </div>
+                      <div className={styles.warehouseList}>
+                        {catalogMeta[selectedVariantId].stock_data && catalogMeta[selectedVariantId].stock_data!.length > 0 ? (
+                          catalogMeta[selectedVariantId].stock_data!.map((s, i) => (
+                            <div key={i} className={styles.warehouseRow}>
+                              <span>{s.warehouse_name}</span>
+                              <strong>{s.quantity}</strong>
+                            </div>
+                          ))
+                        ) : (
+                          <div className={styles.noStock}>No stock available in any warehouse</div>
+                        )}
+                      </div>
                     </div>
                   ) : null}
                 </div>

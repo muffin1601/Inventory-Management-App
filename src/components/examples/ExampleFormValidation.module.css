@@ -62,7 +62,7 @@
 
 .legend {
   font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.04em;
@@ -82,7 +82,7 @@
 .secondaryBtn {
   padding: 0.65rem 1.2rem;
   border-radius: 4px;
-  font-weight: 700;
+  font-weight: 500;
   font-size: 0.9rem;
   cursor: pointer;
   transition: all 0.2s;
@@ -131,7 +131,7 @@
 
 .required {
   color: #dc2626;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 @media (max-width: 640px) {

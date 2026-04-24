@@ -1,6 +1,3 @@
-// Production-ready modules service using Supabase database
-// This replaces the localStorage-based user management
-
 import { supabase } from '@/lib/supabase';
 import type {
   UserAccessRow,
@@ -1374,14 +1371,19 @@ export const modulesService = {
       if (finalProjectId) {
         try {
           for (const item of items) {
-            // Find in boq_items by project_id and item_name
-            const { data: boqItem, error: fetchError } = await supabase
+            // Find in boq_items by project_id and variant_id OR item_name
+            let boqQuery = supabase
               .from('boq_items')
               .select('id, delivered')
-              .eq('project_id', finalProjectId)
-              .ilike('item_name', item.name.trim())
-              .limit(1)
-              .single();
+              .eq('project_id', finalProjectId);
+            
+            if (item.variant_id) {
+              boqQuery = boqQuery.eq('variant_id', item.variant_id);
+            } else {
+              boqQuery = boqQuery.ilike('item_name', item.name.trim());
+            }
+
+            const { data: boqItem, error: fetchError } = await boqQuery.limit(1).single();
 
             if (!fetchError && boqItem) {
               const newDelivered = (Number(boqItem.delivered) || 0) + Number(item.quantity);
@@ -1401,7 +1403,10 @@ export const modulesService = {
               const state = JSON.parse(raw);
               if (state[finalProjectId]) {
                 state[finalProjectId] = state[finalProjectId].map((boq: any) => {
-                  const match = items.find(i => i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase());
+                  const match = items.find(i => {
+                    if (i.variant_id && boq.variant_id) return i.variant_id === boq.variant_id;
+                    return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
+                  });
                   if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };
                   return boq;
                 });
@@ -1509,13 +1514,18 @@ export const modulesService = {
       if (challan.project_id && items && items.length > 0) {
         try {
           for (const item of items) {
-            const { data: boqItem, error: boqError } = await supabase
+            let boqQuery = supabase
               .from('boq_items')
               .select('id, delivered')
-              .eq('project_id', challan.project_id)
-              .ilike('item_name', item.name.trim())
-              .limit(1)
-              .single();
+              .eq('project_id', challan.project_id);
+
+            if (item.variant_id) {
+              boqQuery = boqQuery.eq('variant_id', item.variant_id);
+            } else {
+              boqQuery = boqQuery.ilike('item_name', item.name.trim());
+            }
+
+            const { data: boqItem, error: boqError } = await boqQuery.limit(1).single();
 
             if (!boqError && boqItem) {
               const newDelivered = Math.max(0, (Number(boqItem.delivered) || 0) - Number(item.quantity));
@@ -1533,7 +1543,10 @@ export const modulesService = {
               const state = JSON.parse(raw);
               if (state[challan.project_id]) {
                 state[challan.project_id] = state[challan.project_id].map((boq: any) => {
-                  const match = items.find(i => i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase());
+                  const match = items.find(i => {
+                    if (i.variant_id && boq.variant_id) return i.variant_id === boq.variant_id;
+                    return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
+                  });
                   if (match) return { ...boq, delivered: Math.max(0, (Number(boq.delivered) || 0) - Number(match.quantity)) };
                   return boq;
                 });
@@ -1607,6 +1620,202 @@ export const modulesService = {
 
   async saveDeliveryReceipts(receipts: DeliveryReceiptRow[]): Promise<void> {
     writeLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY, receipts);
+  },
+
+  async createDeliveryReceipt(
+    receipt: Partial<DeliveryReceiptRow>,
+    items: Array<{ name: string; quantity: number; unit: string; variant_id?: string; condition?: string }>,
+    userId: string
+  ): Promise<{ id: string; receipt_no: string }> {
+    try {
+      const receiptNo = receipt.receipt_no || `DR-${Date.now().toString().slice(-6)}`;
+      const projectName = receipt.project_name || '';
+      const vendorName = receipt.vendor_name || '';
+      
+      const finalProjectId = await findProjectIdByName(projectName);
+      const finalVendorId = vendorName ? await ensureVendor(vendorName) : null;
+      
+      const receiptId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9);
+      
+      const receiptToInsert: any = {
+        id: receiptId,
+        receipt_no: receiptNo,
+        type: receipt.type || 'SITE_DELIVERY',
+        date: receipt.date || new Date().toISOString().split('T')[0],
+        linked_po: receipt.linked_po || null,
+        receiver_name: receipt.receiver_name || null,
+        contact: receipt.contact || null,
+        status: receipt.status || 'VERIFIED',
+        remarks: receipt.remarks || null,
+        created_by: userId
+      };
+
+      if (finalProjectId) receiptToInsert.project_id = finalProjectId;
+      if (finalVendorId) receiptToInsert.vendor_id = finalVendorId;
+
+      const { error: drError } = await supabase.from('delivery_receipts').insert(receiptToInsert);
+      if (drError) {
+        // Fallback to legacy receipts table if delivery_receipts doesn't exist
+        if (isSchemaError(drError)) {
+          const legacyReceipt: any = {
+            id: receiptId,
+            receipt_no: receiptNo,
+            type: receipt.type || 'SITE_DELIVERY',
+            date: receipt.date || new Date().toISOString().split('T')[0],
+            project_name: projectName,
+            vendor_name: vendorName,
+            linked_po: receipt.linked_po || null,
+            receiver_name: receipt.receiver_name || null,
+            contact: receipt.contact || null,
+            status: receipt.status || 'VERIFIED',
+            remarks: receipt.remarks || null
+          };
+          await supabase.from('receipts').insert(legacyReceipt);
+        } else {
+          throw drError;
+        }
+      }
+
+      // Insert items if table exists and we have variants
+      if (items && items.length > 0) {
+        const itemsToInsert = items.map(item => ({
+          receipt_id: receiptId,
+          variant_id: item.variant_id,
+          quantity: Number(item.quantity),
+          unit: item.unit || 'Nos',
+          condition: item.condition || 'GOOD'
+        })).filter(i => i.variant_id); // Only insert if we have a variant_id due to NOT NULL constraint
+
+        if (itemsToInsert.length > 0) {
+          const { error: itemsError } = await supabase.from('delivery_receipt_items').insert(itemsToInsert);
+          if (itemsError && !isSchemaError(itemsError)) console.warn('Error saving receipt items:', itemsError);
+        }
+      }
+
+      // Update BOQ delivered quantities (Live Sync)
+      if (finalProjectId) {
+        try {
+          for (const item of items) {
+            let boqQuery = supabase
+              .from('boq_items')
+              .select('id, delivered')
+              .eq('project_id', finalProjectId);
+            
+            if (item.variant_id) {
+              boqQuery = boqQuery.eq('variant_id', item.variant_id);
+            } else {
+              boqQuery = boqQuery.ilike('item_name', item.name.trim());
+            }
+
+            const { data: boqItem, error: fetchError } = await boqQuery.limit(1).single();
+
+            if (!fetchError && boqItem) {
+              const newDelivered = (Number(boqItem.delivered) || 0) + Number(item.quantity);
+              await supabase
+                .from('boq_items')
+                .update({ delivered: newDelivered })
+                .eq('id', boqItem.id);
+            }
+          }
+          
+          // Local Storage Sync
+          if (typeof window !== 'undefined') {
+            const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
+            if (raw) {
+              const state = JSON.parse(raw);
+              if (state[finalProjectId]) {
+                state[finalProjectId] = state[finalProjectId].map((boq: any) => {
+                  const match = items.find(i => {
+                    if (i.variant_id && boq.variant_id) return i.variant_id === boq.variant_id;
+                    return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
+                  });
+                  if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };
+                  return boq;
+                });
+                window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[BOQ-SYNC] Sync warning:', e);
+        }
+      }
+
+      return { id: receiptId, receipt_no: receiptNo };
+    } catch (error) {
+      console.error('Error creating delivery receipt:', error);
+      throw error;
+    }
+  },
+
+  async deleteDeliveryReceipt(receiptId: string, userId: string): Promise<void> {
+    try {
+      // 1. Get receipt details and items before deletion to revert BOQ
+      const { data: receipt, error: fetchError } = await supabase
+        .from('delivery_receipts')
+        .select('project_id, type')
+        .eq('id', receiptId)
+        .single();
+
+      // Fallback for legacy table
+      if (fetchError || !receipt) {
+        const { data: legacy, error: legacyError } = await supabase
+          .from('receipts')
+          .select('*')
+          .eq('id', receiptId)
+          .single();
+        
+        if (legacyError || !legacy) throw new Error('Receipt not found');
+        
+        // Resolve project ID if possible
+        const pid = legacy.project_id || await findProjectIdByName(legacy.project_name);
+        
+        // Legacy receipts might not have separate items, so we can't easily revert quantities
+        // unless we have them in the row.
+      } else {
+        const { data: items, error: itemsError } = await supabase
+          .from('delivery_receipt_items')
+          .select('variant_id, quantity')
+          .eq('receipt_id', receiptId);
+
+        // 2. Revert BOQ delivered quantities
+        if (receipt.project_id && items && items.length > 0) {
+           for (const item of items) {
+             const { data: boqItem, error: boqError } = await supabase
+               .from('boq_items')
+               .select('id, delivered')
+               .eq('project_id', receipt.project_id)
+               .eq('variant_id', item.variant_id)
+               .limit(1)
+               .single();
+
+             if (!boqError && boqItem) {
+               const newDelivered = Math.max(0, (Number(boqItem.delivered) || 0) - Number(item.quantity));
+               await supabase
+                 .from('boq_items')
+                 .update({ delivered: newDelivered })
+                 .eq('id', boqItem.id);
+             }
+           }
+        }
+      }
+
+      // 3. Delete receipt
+      const { error: deleteError } = await supabase
+        .from('delivery_receipts')
+        .delete()
+        .eq('id', receiptId);
+
+      if (deleteError && isSchemaError(deleteError)) {
+        await supabase.from('receipts').delete().eq('id', receiptId);
+      } else if (deleteError) {
+        throw deleteError;
+      }
+
+    } catch (error) {
+      console.error('Error deleting delivery receipt:', error);
+      throw error;
+    }
   },
 
   async getPaymentSlips(): Promise<PaymentSlipRow[]> {

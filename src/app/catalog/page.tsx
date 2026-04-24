@@ -781,7 +781,7 @@ export default function ProductsPage() {
                         </div>
                         {product.variants?.map((v: any) => (
                           <div key={v.id} className={styles.variantRow}>
-                              <div style={{ fontSize: '0.8rem', fontWeight: 700, color: 'var(--text-primary)' }}>{v.sku}</div>
+                              <div style={{ fontSize: '0.8rem', fontWeight: 500, color: 'var(--text-primary)' }}>{v.sku}</div>
                               <div style={{ fontSize: '0.75rem', color: 'var(--text-secondary)' }}>{v.attributes.Manufacturer || '-'}</div>
                               <div className={styles.variantAttrs}>
                                 {Object.entries(v.attributes).map(([k, val]) => (

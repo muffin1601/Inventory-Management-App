@@ -82,7 +82,7 @@
 .statLabel {
   color: var(--text-secondary);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -357,7 +357,7 @@
 }
 
 .roleCardTitle {
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .roleCardMeta {
@@ -407,7 +407,7 @@
   margin-bottom: 0.35rem;
   color: var(--text-secondary);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }

@@ -13,7 +13,7 @@
 
 .title {
   font-size: 1.45rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -179,7 +179,7 @@
 .panelTitle,
 .summaryTitle {
   font-size: 0.84rem;
-  font-weight: 700;
+  font-weight: 500;
   margin-bottom: 0.75rem;
   text-transform: uppercase;
 }
@@ -191,7 +191,7 @@
 .formGroup label {
   display: block;
   font-size: 0.68rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 0.35rem;
   text-transform: uppercase;
@@ -239,7 +239,7 @@
 .secondaryAction,
 .dangerAction {
   padding: 0.7rem 0.85rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.03em;
   font-size: 0.82rem;
 }
@@ -320,7 +320,7 @@
 
 .modalTitle {
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 500;
   margin-bottom: 0.2rem;
 }
 
@@ -378,7 +378,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
-  font-weight: 700;
+  font-weight: 500;
   color: #92400e;
   margin-bottom: 0.5rem;
 }

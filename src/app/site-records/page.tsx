@@ -12,6 +12,7 @@ import { projectsService, type ProjectRecord } from '@/lib/services/projects';
 import { modulesService } from '@/lib/services/modules';
 import { inventoryService } from '@/lib/services/inventory';
 import type { DeliveryReceiptRow, OrderRow, PaymentSlipRow } from '@/types/modules';
+import SearchableSelect from '@/components/ui/SearchableSelect';
 
 type Tab = 'RECEIPTS' | 'PAYMENTS';
 
@@ -55,6 +56,13 @@ export default function SiteRecordsPage() {
   // Modal States
   const [newReceipt, setNewReceipt] = useState<Partial<DeliveryReceiptRow>>({
     type: 'SITE_DELIVERY', status: 'VERIFIED', items: []
+  });
+
+  const [newPayment, setNewPayment] = useState<Partial<PaymentSlipRow>>({
+    date: new Date().toISOString().split('T')[0],
+    due_date: new Date().toISOString().split('T')[0],
+    payment_method: 'BANK_TRANSFER',
+    status: 'ISSUED'
   });
 
   useEffect(() => {
@@ -110,7 +118,6 @@ export default function SiteRecordsPage() {
     setSlips(data);
     modulesService.savePaymentSlips(data);
   };
-
   const handleCreateReceipt = async () => {
     if (!newReceipt.project_name || (newReceipt.items?.length || 0) === 0) {
       showToast('Fill required fields', 'error');
@@ -131,16 +138,24 @@ export default function SiteRecordsPage() {
 
     if (!confirmed.confirmed) return;
 
-    saveReceipts([receipt, ...receipts]);
-    setCreateReceiptOpen(false);
-    setNewReceipt({ type: 'SITE_DELIVERY', status: 'VERIFIED', items: [] });
     try {
       const currentUser = await modulesService.getCurrentUser();
+      const result = await modulesService.createDeliveryReceipt(
+        receipt,
+        receipt.items,
+        currentUser?.id || 'anonymous'
+      );
+
+      const finalReceipt = { ...receipt, id: result.id, receipt_no: result.receipt_no };
+      setReceipts([finalReceipt, ...receipts]);
+      setCreateReceiptOpen(false);
+      setNewReceipt({ type: 'SITE_DELIVERY', status: 'VERIFIED', items: [] });
+      
       await modulesService.addAudit({
         action: 'RECEIPT_CREATED',
         entity_type: 'receipt',
-        entity_id: receipt.id,
-        entity_name: receipt.receipt_no,
+        entity_id: result.id,
+        entity_name: result.receipt_no,
         reason: `Material receipt recorded for ${receipt.project_name}`,
         performed_by: currentUser?.email || 'Unknown',
         details: `${receipt.type} | ${receipt.items.length} items | Vendor: ${receipt.vendor_name}`,
@@ -154,7 +169,8 @@ export default function SiteRecordsPage() {
       });
       showToast('Receipt Created', 'success');
     } catch (error) {
-      console.error('Failed to add receipt audit:', error);
+      console.error('Failed to create receipt:', error);
+      showToast('Could not save receipt to database', 'error');
     }
   };
 
@@ -209,17 +225,20 @@ export default function SiteRecordsPage() {
 
   const handleCreatePayment = async (e: React.FormEvent) => {
     e.preventDefault();
-    const fd = new FormData(e.target as HTMLFormElement);
+    if (!newPayment.vendor_name || !newPayment.amount) {
+      showToast('Please fill required fields', 'error');
+      return;
+    }
     const slip: PaymentSlipRow = {
       id: makeClientId('payment'),
       slip_no: makeDocumentNumber('PS'),
-      date: new Date().toISOString().split('T')[0],
-      due_date: fd.get('due_date') as string,
-      vendor_name: fd.get('vendor_name') as string,
-      po_ref: fd.get('po_ref') as string,
-      amount: Number(fd.get('amount')),
-      payment_method: fd.get('payment_method') as any,
-      ref_no: fd.get('ref_no') as string,
+      date: newPayment.date || new Date().toISOString().split('T')[0],
+      due_date: newPayment.due_date || '',
+      vendor_name: newPayment.vendor_name || '',
+      po_ref: newPayment.po_ref || '',
+      amount: Number(newPayment.amount),
+      payment_method: newPayment.payment_method as any || 'BANK_TRANSFER',
+      ref_no: newPayment.ref_no || '',
       prepared_by: 'Admin',
       status: 'ISSUED'
     };
@@ -234,6 +253,12 @@ export default function SiteRecordsPage() {
 
     saveSlips([slip, ...slips]);
     setCreatePaymentOpen(false);
+    setNewPayment({
+      date: new Date().toISOString().split('T')[0],
+      due_date: new Date().toISOString().split('T')[0],
+      payment_method: 'BANK_TRANSFER',
+      status: 'ISSUED'
+    });
     try {
       const currentUser = await modulesService.getCurrentUser();
       await modulesService.addAudit({
@@ -336,10 +361,13 @@ export default function SiteRecordsPage() {
                             requireReason: true,
                           });
                           if (confirmed.confirmed) {
-                            const next = receipts.filter(x => x.id !== r.id);
-                            saveReceipts(next);
                             try {
                               const currentUser = await modulesService.getCurrentUser();
+                              await modulesService.deleteDeliveryReceipt(r.id, currentUser?.id || 'anonymous');
+                              
+                              const next = receipts.filter(x => x.id !== r.id);
+                              setReceipts(next);
+
                               await modulesService.addAudit({
                                 action: 'RECEIPT_DELETED',
                                 entity_type: 'receipt',
@@ -356,7 +384,8 @@ export default function SiteRecordsPage() {
                               });
                               showToast('Receipt deleted', 'success');
                             } catch (error) {
-                              console.error('Failed to add receipt deletion audit:', error);
+                              console.error('Failed to delete receipt:', error);
+                              showToast('Could not delete receipt from database', 'error');
                             }
                           }
                       }}><Trash2 size={14} /></button>
@@ -498,6 +527,7 @@ export default function SiteRecordsPage() {
                           .map(i => ({ 
                             id: i.id, 
                             name: i.item_name, 
+                            variant_id: i.variant_id,
                             quantity: Math.max(0, i.quantity - (i.delivered || 0)), 
                             unit: i.unit, 
                             condition: 'GOOD' as const 
@@ -524,12 +554,16 @@ export default function SiteRecordsPage() {
 
               {newReceipt.type === 'STORE_DELIVERY' && (
                 <div className={styles.fGroup} style={{ marginTop: '0.75rem' }}>
-                  <label>LINKED PURCHASE ORDER (PO)</label>
-                  <select 
-                    className={styles.fSelect}
+                  <SearchableSelect
+                    label="LINKED PURCHASE ORDER (PO)"
+                    placeholder="Search PO Number..."
                     value={newReceipt.linked_po || ''}
-                    onChange={e => {
-                      const orderNo = e.target.value;
+                    options={orders.map(o => ({
+                      value: o.order_number,
+                      label: `${o.order_number} - ${o.vendor_name}`,
+                      keywords: [o.order_number, o.vendor_name]
+                    }))}
+                    onChange={orderNo => {
                       const order = orders.find(o => o.order_number === orderNo);
                       if (order) {
                         setNewReceipt({
@@ -549,10 +583,7 @@ export default function SiteRecordsPage() {
                         setNewReceipt({ ...newReceipt, linked_po: orderNo });
                       }
                     }}
-                  >
-                    <option value="">Select PO to auto-fill items...</option>
-                    {orders.map(o => <option key={o.id} value={o.order_number}>{o.order_number} - {o.vendor_name}</option>)}
-                  </select>
+                  />
                 </div>
               )}
 
@@ -582,14 +613,27 @@ export default function SiteRecordsPage() {
                   {newReceipt.items?.map((item, idx) => (
                     <div key={item.id} className={styles.matRow}>
                       <select className={styles.fSelect} style={{ flex: 1 }} value={item.name} onChange={e => {
+                        const pname = e.target.value;
                         const items = [...(newReceipt.items || [])];
-                        items[idx].name = e.target.value;
+                        items[idx].name = pname;
+                        
+                        // Auto-pick variant and unit from catalog
+                        const product = catalogItems.find(p => p.name === pname);
+                        if (product) {
+                          if (product.variants?.[0]) {
+                            items[idx].variant_id = product.variants[0].id;
+                          }
+                          if (product.unit) {
+                            items[idx].unit = product.unit;
+                          }
+                        }
+                        
                         if (items[idx].quantity === 0) items[idx].quantity = 1;
                         setNewReceipt({...newReceipt, items});
                       }}>
                         <option value="">Choose item...</option>
                         {catalogItems.map(p => <option key={p.id} value={p.name}>{p.name}</option>)}
-                        {item.name && <option value={item.name}>{item.name}</option>}
+                        {item.name && !catalogItems.some(p => p.name === item.name) && <option value={item.name}>{item.name}</option>}
                       </select>
                       <input 
                         type="number" 
@@ -626,32 +670,71 @@ export default function SiteRecordsPage() {
             <form onSubmit={handleCreatePayment}>
               <div className={styles.modalBody}>
                 <div className={styles.fGroup}>
-                  <label>PO REFERENCE (Optional)</label>
-                  <select name="po_ref" className={styles.fSelect} onChange={e => {
-                     const order = orders.find(o => o.order_number === e.target.value);
-                     if(order) (document.getElementById('ven_name') as HTMLInputElement).value = order.vendor_name;
-                  }}>
-                    <option value="">Manual Entry...</option>
-                    {orders.map(o => <option key={o.id} value={o.order_number}>{o.order_number} - {o.vendor_name}</option>)}
-                  </select>
+                  <SearchableSelect
+                    label="PO REFERENCE (Optional)"
+                    placeholder="Search PO Number..."
+                    value={newPayment.po_ref || ''}
+                    options={orders.map(o => ({
+                      value: o.order_number,
+                      label: `${o.order_number} - ${o.vendor_name}`,
+                      keywords: [o.order_number, o.vendor_name]
+                    }))}
+                    onChange={orderNo => {
+                      const order = orders.find(o => o.order_number === orderNo);
+                      if (order) {
+                        setNewPayment({
+                          ...newPayment,
+                          po_ref: orderNo,
+                          vendor_name: order.vendor_name
+                        });
+                      } else {
+                        setNewPayment({ ...newPayment, po_ref: orderNo });
+                      }
+                    }}
+                  />
                 </div>
                 <div className={styles.fGroup} style={{ marginTop: '0.75rem' }}>
                   <label>VENDOR / PAYEE NAME *</label>
-                  <input id="ven_name" name="vendor_name" className={styles.fInput} required />
+                  <input 
+                    name="vendor_name" 
+                    className={styles.fInput} 
+                    required 
+                    value={newPayment.vendor_name || ''} 
+                    onChange={e => setNewPayment({...newPayment, vendor_name: e.target.value})} 
+                  />
                 </div>
                 <div className={styles.grid2} style={{ marginTop: '0.75rem' }}>
                   <div className={styles.fGroup}>
                     <label>DUE DATE *</label>
-                    <input type="date" name="due_date" className={styles.fInput} required defaultValue={new Date().toISOString().split('T')[0]} />
+                    <input 
+                      type="date" 
+                      name="due_date" 
+                      className={styles.fInput} 
+                      required 
+                      value={newPayment.due_date || ''} 
+                      onChange={e => setNewPayment({...newPayment, due_date: e.target.value})} 
+                    />
                   </div>
                   <div className={styles.fGroup}>
                     <label>AMOUNT (INR) *</label>
-                    <input type="number" name="amount" className={styles.fInput} required />
+                    <input 
+                      type="number" 
+                      name="amount" 
+                      className={styles.fInput} 
+                      required 
+                      value={newPayment.amount || ''} 
+                      onChange={e => setNewPayment({...newPayment, amount: Number(e.target.value)})} 
+                    />
                   </div>
                 </div>
                 <div className={styles.fGroup} style={{ marginTop: '0.75rem' }}>
                   <label>PAYMENT MODE</label>
-                  <select name="payment_method" className={styles.fSelect}>
+                  <select 
+                    name="payment_method" 
+                    className={styles.fSelect}
+                    value={newPayment.payment_method || 'BANK_TRANSFER'}
+                    onChange={e => setNewPayment({...newPayment, payment_method: e.target.value as any})}
+                  >
                     <option value="BANK_TRANSFER">Bank Transfer</option>
                     <option value="UPI">UPI</option>
                     <option value="CHEQUE">Cheque</option>

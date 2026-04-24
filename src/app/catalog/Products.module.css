@@ -14,7 +14,7 @@
 
 .title {
   font-size: 1.25rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-primary);
   margin-bottom: 0rem;
   letter-spacing: -0.01em;
@@ -302,7 +302,7 @@
 .categoryTag {
   font-size: 0.7rem;
   text-transform: uppercase;
-  font-weight: 700;
+  font-weight: 500;
   background: #f1f5f9;
   padding: 2px 8px;
   color: var(--text-secondary);
@@ -395,7 +395,7 @@
 .variantHeader {
   padding: 0.8rem 0;
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   color: var(--text-secondary);
   letter-spacing: 0.08em;
@@ -410,14 +410,14 @@
 
 .variantStockText,
 .variantFreeText {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-primary);
   text-align: right;
   padding-right: 1.5rem;
 }
 
 .variantSkuText {
-  font-weight: 600;
+  font-weight: 500;
   color: var(--text-primary);
   text-transform: uppercase;
 }
@@ -498,7 +498,7 @@
 
 .cardTitle {
   font-size: 0.92rem;
-  font-weight: 700;
+  font-weight: 500;
   margin-bottom: 0.9rem;
   text-transform: uppercase;
   letter-spacing: 0.02em;
@@ -513,7 +513,7 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-secondary);
   margin-bottom: 0.4rem;
   text-transform: uppercase;
@@ -566,7 +566,7 @@
 
 .textBtn {
   font-size: 0.8rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--accent-primary);
   text-transform: uppercase;
 }
@@ -599,7 +599,7 @@
   background: #f8fafc;
   border: 1px solid var(--border-color);
   color: var(--accent-primary);
-  font-weight: 700;
+  font-weight: 500;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -651,7 +651,7 @@
 
 .variantSku {
   font-size: 0.85rem;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .variantAttrs {
@@ -917,7 +917,7 @@
 
 .deleteModalTitle {
   font-size: 1rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--danger);
   margin-bottom: 0.1rem;
   letter-spacing: -0.01em;
@@ -1029,7 +1029,7 @@
   padding: 0.5rem 1.4rem;
   background: var(--danger);
   color: white;
-  font-weight: 700;
+  font-weight: 500;
   font-size: 0.8rem;
   letter-spacing: 0.02em;
   border: none;
@@ -1204,7 +1204,7 @@
 
 .vertLabel {
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 500;
   letter-spacing: 0.1em;
   color: var(--text-secondary);
   margin-bottom: 2px;

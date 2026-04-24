@@ -77,10 +77,20 @@ function matchesBoqItem(variant: StockVariant, boqItem: BoqItemRecord) {
   const boqUnit = normalizeText(boqItem.unit);
 
   if (!itemName) return false;
+  
+  // 1. Precise SKU match (Best)
+  if (sku && (itemName === sku || itemName.includes(sku))) return true;
+  
+  // 2. Exact product name match
   if (itemName === productName) return true;
-  if (productName && (productName.includes(itemName) || itemName.includes(productName))) return true;
-  if (sku && (sku === itemName || sku.includes(itemName) || itemName.includes(sku))) return true;
-  if (variantSummary && variantSummary.includes(itemName)) return true;
+  
+  // 3. Partial name match - only if more specific info (like SKU) isn't contradicting
+  // If itemName has a SKU-like pattern in it, and it doesn't match this variant's SKU, don't match
+  const itemNameSkuMatch = itemName.match(/\(([^)]+)\)/);
+  if (itemNameSkuMatch && sku && itemNameSkuMatch[1] !== sku) return false;
+
+  if (productName && itemName.includes(productName)) return true;
+  
   if (boqManufacturer && productManufacturer && boqManufacturer === productManufacturer && productName && itemName.includes(productName)) return true;
   if (boqUnit && unit && boqUnit === unit && productName && itemName.includes(productName)) return true;
   return false;
@@ -196,21 +206,29 @@ export default function StockPage() {
     return next;
   }, [orders]);
 
-  const boqReservedByVariant = useMemo(() => {
-    const next = new Map<string, number>();
+  const boqReserved = useMemo(() => {
+    const warehouseMap = new Map<string, number>(); // key: variantId::warehouseId
+    const globalMap = new Map<string, number>();    // key: variantId
 
     boqItems.forEach((item) => {
-      const remaining = Math.max(item.quantity - item.delivered, 0);
+      const remaining = Math.max(item.quantity - (item.delivered || 0), 0);
       if (remaining <= 0) return;
+      
       let foundVariant = item.variant_id ? variants.find((variant) => variant.id === item.variant_id) : undefined;
       if (!foundVariant) {
         foundVariant = variants.find((variant) => matchesBoqItem(variant, item));
       }
       if (!foundVariant) return;
-      next.set(foundVariant.id, (next.get(foundVariant.id) || 0) + remaining);
+
+      if (item.warehouse_id) {
+        const key = `${foundVariant.id}::${item.warehouse_id}`;
+        warehouseMap.set(key, (warehouseMap.get(key) || 0) + remaining);
+      } else {
+        globalMap.set(foundVariant.id, (globalMap.get(foundVariant.id) || 0) + remaining);
+      }
     });
 
-    return next;
+    return { warehouseMap, globalMap };
   }, [boqItems, variants]);
 
   const filteredVariants = useMemo(
@@ -231,7 +249,15 @@ export default function StockPage() {
       const unit = variant.attributes.Unit || 'Numbers';
       const variantSummary = buildVariantSummary(variant.sku, variant.attributes);
 
+      let remainingGlobalBoq = boqReserved.globalMap.get(variant.id) || 0;
+
       if (variant.stock_data.length === 0) {
+        const explicitWarehousePromise = Array.from(boqReserved.warehouseMap.entries())
+          .filter(([key]) => key.startsWith(`${variant.id}::`))
+          .reduce((sum, [, qty]) => sum + qty, 0);
+        
+        const totalPromised = remainingGlobalBoq + explicitWarehousePromise;
+        
         return [{
           rowKey: `${variant.id}-unassigned`,
           inventoryId: '',
@@ -244,24 +270,30 @@ export default function StockPage() {
           warehouseName: '-',
           unit,
           stock: 0,
-          promised: 0,
-          free: 0,
+          promised: totalPromised,
+          free: -totalPromised,
           attributes: variant.attributes,
         }];
       }
-
-      let remainingBoq = boqReservedByVariant.get(variant.id) || 0;
       
       return variant.stock_data.map((stockRow, index) => {
-        const warehouseKey = `${variant.id}::${stockRow.warehouse_id || ''}`;
+        const warehouseId = stockRow.warehouse_id || '';
+        const warehouseKey = `${variant.id}::${warehouseId}`;
         const orderPromised = promisedMap.get(warehouseKey) || 0;
         
-        // BOQ items are usually project-specific but we allocate from available stock
-        const availableForBoq = Math.max(stockRow.quantity - orderPromised, 0);
-        const boqAllocated = Math.min(availableForBoq, remainingBoq);
-        remainingBoq = Math.max(remainingBoq - boqAllocated, 0);
+        // 1. Start with explicit warehouse promise from BOQ
+        const explicitBoqPromise = boqReserved.warehouseMap.get(warehouseKey) || 0;
         
-        const totalPromised = orderPromised + boqAllocated;
+        // 2. Add global BOQ promise (waterfall allocation)
+        const availableForGlobalBoq = Math.max(stockRow.quantity - orderPromised - explicitBoqPromise, 0);
+        const globalBoqAllocated = Math.min(availableForGlobalBoq, remainingGlobalBoq);
+        remainingGlobalBoq = Math.max(remainingGlobalBoq - globalBoqAllocated, 0);
+        
+        // 3. Handle overflow on the last row
+        const isLastRow = index === variant.stock_data.length - 1;
+        const boqOverflow = isLastRow ? remainingGlobalBoq : 0;
+        
+        const totalPromised = orderPromised + explicitBoqPromise + globalBoqAllocated + boqOverflow;
 
         return {
           rowKey: `${variant.id}-${stockRow.warehouse_id || index}`,
@@ -281,7 +313,7 @@ export default function StockPage() {
         };
       });
     })
-  ), [boqReservedByVariant, filteredVariants, promisedMap]);
+  ), [boqReserved, filteredVariants, promisedMap]);
 
   // Track which BOQ items are NOT matched to any inventory product
   const unmatchedBoqItems = useMemo(() => {

@@ -39,6 +39,8 @@ export default function ChallansPage() {
   const [loadingBoq, setLoadingBoq] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
+  const [vendors, setVendors] = useState<string[]>([]);
+  const [purchaseOrders, setPurchaseOrders] = useState<string[]>([]);
   const [newChallan, setNewChallan] = useState<Partial<Challan>>({
     status: 'ISSUED',
     items: []
@@ -58,6 +60,14 @@ export default function ChallansPage() {
         
         setProjects(projRes.projects);
         setChallans(challansRes);
+        
+        // Extract unique vendors from existing challans
+        const uniqueVendors = [...new Set(challansRes.map(c => c.vendor_name).filter(Boolean))];
+        setVendors(uniqueVendors);
+        
+        // Extract unique POs from existing challans
+        const uniquePOs = [...new Set(challansRes.map(c => c.po_no).filter(Boolean))];
+        setPurchaseOrders(uniquePOs);
       } catch (error) {
         console.error('Error loading data:', error);
         showToast('Failed to load challans', 'error');
@@ -119,6 +129,23 @@ export default function ChallansPage() {
         return;
       }
 
+      if (!newChallan.project_name?.trim()) {
+        showToast('Please select a project', 'error');
+        return;
+      }
+
+      /* 
+      if (!newChallan.vendor_name?.trim()) {
+        showToast('Please enter vendor name', 'error');
+        return;
+      }
+
+      if (!newChallan.po_no?.trim()) {
+        showToast('Please enter PO number', 'error');
+        return;
+      }
+      */
+
       const itemsToDispatch = dispatchItems
         .filter(i => i.dispatchQty > 0)
         .map(i => ({
@@ -129,11 +156,6 @@ export default function ChallansPage() {
 
       if (itemsToDispatch.length === 0) {
         showToast('Select at least one item to dispatch', 'info');
-        return;
-      }
-
-      if (!newChallan.project_name?.trim()) {
-        showToast('Please select a project', 'error');
         return;
       }
 
@@ -148,9 +170,9 @@ export default function ChallansPage() {
       // Create challan in database
       const result = await modulesService.createChallan(
         challanNo,
-        newChallan.po_no || '',
+        newChallan.po_no || 'N/A',
         newChallan.project_name,
-        newChallan.vendor_name || 'Project Site',
+        newChallan.vendor_name || 'N/A',
         new Date().toISOString().split('T')[0],
         itemsToDispatch,
         user.id,
@@ -363,7 +385,7 @@ export default function ChallansPage() {
                 <tr>
                   <th style={{ width: '40px' }}>#</th>
                   <th>Challan No</th>
-                  <th>Project & PO</th>
+                  <th>Project</th>
                   <th>Dispatch Date</th>
                   <th>Status</th>
                   <th style={{ textAlign: 'right' }}>Actions</th>
@@ -384,11 +406,9 @@ export default function ChallansPage() {
                       <td style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{(page - 1) * pageSize + index + 1}</td>
                       <td>
                         <div style={{ fontWeight: 800 }}>{challan.challan_no}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{challan.vendor_name}</div>
                       </td>
                       <td>
                         <div style={{ fontWeight: 600 }}>{challan.project_name}</div>
-                        <div style={{ fontSize: '0.75rem', color: 'var(--accent-blue)' }}>{challan.po_no || 'N/A'}</div>
                       </td>
                       <td>{challan.dispatch_date}</td>
                       <td>
@@ -506,6 +526,44 @@ export default function ChallansPage() {
                 </select>
               </div>
 
+              {/* PO and Vendor Selection Hidden */}
+              {/* 
+              {dispatchItems.length > 0 && (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem', marginBottom: '1.5rem' }}>
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>Vendor Name *</label>
+                      <select
+                        className={styles.select}
+                        value={newChallan.vendor_name || ''}
+                        onChange={(e) => setNewChallan({ ...newChallan, vendor_name: e.target.value })}
+                        required
+                      >
+                        <option value="">Select or enter vendor name...</option>
+                        {vendors.map(v => (
+                          <option key={v} value={v}>{v}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className={styles.fieldGroup}>
+                      <label className={styles.fieldLabel}>PO Number *</label>
+                      <select
+                        className={styles.select}
+                        value={newChallan.po_no || ''}
+                        onChange={(e) => setNewChallan({ ...newChallan, po_no: e.target.value })}
+                        required
+                      >
+                        <option value="">Select PO number...</option>
+                        {purchaseOrders.map(po => (
+                          <option key={po} value={po}>{po}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                </>
+              )}
+              */}
+
               {loadingBoq && <div style={{ textAlign: 'center', padding: '1rem' }}>Loading BOQ Items...</div>}
 
               {dispatchItems.length > 0 && (
@@ -563,7 +621,7 @@ export default function ChallansPage() {
             </div>
             <div className={styles.modalFooter}>
               <div style={{ marginRight: 'auto', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
-                Step 3: Review the quantities, then generate the challan.
+                Step 4: Review the quantities, then generate the challan.
               </div>
               <button 
                 className={styles.actionBtn} 
@@ -601,10 +659,6 @@ export default function ChallansPage() {
                   <div className={styles.fieldLabel}>Project</div>
                   <div style={{ fontWeight: 700 }}>{viewingChallan.project_name}</div>
                 </div>
-                <div>
-                  <div className={styles.fieldLabel}>PO Ref</div>
-                  <div style={{ fontWeight: 700 }}>{viewingChallan.po_no}</div>
-                </div>
               </div>
 
               <div className={styles.fieldLabel}>Dispatched Items</div>
@@ -630,7 +684,7 @@ export default function ChallansPage() {
                       className={styles.primaryAction} 
                       style={{ 
                         flex: 1, 
-                        background: viewingChallan.status === s ? 'var(--accent-blue)' : '#f1f5f9',
+                        background: viewingChallan.status === s ? '#1e293b' : '#f1f5f9',
                         color: viewingChallan.status === s ? 'white' : '#475569',
                         fontSize: '0.65rem',
                         cursor: viewingChallan.status === s || isSaving ? 'not-allowed' : 'pointer',

@@ -19,7 +19,7 @@
 
 .title {
   font-size: 1.5rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-primary);
   margin-bottom: 0.25rem;
 }
@@ -400,7 +400,7 @@
   border: none;
   border-radius: var(--radius-md);
   padding: 0.7rem 1.2rem;
-  font-weight: 700;
+  font-weight: 500;
   font-size: 0.85rem;
   cursor: pointer;
   transition: all 0.2s;
@@ -500,7 +500,7 @@
 
 .table th {
   text-align: left;
-  padding: 0.5rem 0.75rem;
+  padding: 0.4rem 0.65rem;
   font-size: 0.7rem;
   font-weight: 600;
   color: var(--text-secondary);
@@ -625,7 +625,7 @@
   min-height: 36px;
   border-radius: 0;
   font-size: 0.72rem;
-  font-weight: 700;
+  font-weight: 500;
   white-space: nowrap;
 }
 
@@ -689,7 +689,7 @@
   width: 30px;
   height: 30px;
   font-size: 0.75rem;
-  font-weight: 700;
+  font-weight: 500;
   border-radius: 0;
   border: 1px solid transparent;
   cursor: pointer;
@@ -932,7 +932,7 @@
   border: none;
   border-radius: var(--radius-md);
   padding: 0.85rem 1.5rem;
-  font-weight: 700;
+  font-weight: 500;
   font-size: 0.95rem;
   cursor: pointer;
   transition: all 0.2s;

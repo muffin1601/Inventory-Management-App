@@ -17,6 +17,7 @@ export type BoqItemRecord = {
   id: string;
   project_id: string;
   variant_id?: string;
+  warehouse_id?: string;
   item_name: string;
   manufacturer?: string;
   quantity: number;
@@ -404,6 +405,7 @@ export const projectsService = {
   async addBoqItem(input: {
     projectId: string;
     variant_id?: string;
+    warehouse_id?: string;
     item_name: string;
     manufacturer?: string;
     quantity: number;
@@ -425,6 +427,7 @@ export const projectsService = {
         id: makeId('boq'),
         project_id: input.projectId,
         variant_id: input.variant_id,
+        warehouse_id: input.warehouse_id,
         item_name: trimmedName,
         manufacturer: trimmedManufacturer,
         quantity: input.quantity,
@@ -449,6 +452,7 @@ export const projectsService = {
     if (trimmedManufacturer) payload.manufacturer = trimmedManufacturer;
     if (delivered) payload.delivered = delivered;
     if (input.variant_id) payload.variant_id = input.variant_id;
+    if (input.warehouse_id) payload.warehouse_id = input.warehouse_id;
 
     const insert = await supabase.from(table).insert(payload).select('*').single();
 
@@ -463,6 +467,8 @@ export const projectsService = {
         };
         if (trimmedManufacturer) fallbackPayload.manufacturer = trimmedManufacturer;
         if (delivered) fallbackPayload.delivered = delivered;
+        if (input.variant_id) fallbackPayload.variant_id = input.variant_id;
+        if (input.warehouse_id) fallbackPayload.warehouse_id = input.warehouse_id;
 
         const fallbackInsert = await supabase
           .from(table)

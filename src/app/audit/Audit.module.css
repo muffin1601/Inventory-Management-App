@@ -98,7 +98,7 @@
 .statLabel {
   color: var(--text-secondary);
   font-size: 0.76rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -181,7 +181,7 @@
   background: #f8fafc;
   color: var(--text-secondary);
   font-size: 0.78rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -198,7 +198,7 @@
 }
 
 .primaryCell {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-primary);
 }
 
@@ -216,7 +216,7 @@
   background: #f3f4f6;
   border: 1px solid var(--border-color);
   font-size: 0.74rem;
-  font-weight: 700;
+  font-weight: 500;
   text-transform: uppercase;
 }
 
@@ -385,7 +385,7 @@
 
 .modalTitle {
   font-size: 1.1rem;
-  font-weight: 700;
+  font-weight: 500;
   margin: 0;
 }
 
@@ -413,7 +413,7 @@
 .detailSection label {
   display: block;
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.05em;

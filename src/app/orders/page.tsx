@@ -1316,16 +1316,16 @@ export default function OrdersPage() {
                 const isPending = order.status === 'pending_approval';
                 return (
                   <tr key={order.id}>
-                    <td style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{(page - 1) * pageSize + index + 1}</td>
-                    <td><div style={{ fontWeight: 800 }}>{order.order_number}</div></td>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.6rem' }}>{(page - 1) * pageSize + index + 1}</td>
+                    <td><div style={{ fontWeight: 600 }}>{order.order_number}</div></td>
                     <td>
-                      <div style={{ fontWeight: 600 }}>{displayName}</div>
+                      <div style={{ fontWeight: 500 }}>{displayName}</div>
                       {order.project_name && (
                         <div style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>{order.project_name}</div>
                       )}
                     </td>
                     <td>
-                      <div style={{ fontWeight: 700 }}>Rs. {new Intl.NumberFormat('en-IN').format(orderTotal)}</div>
+                      <div style={{ fontWeight: 500 }}>Rs. {new Intl.NumberFormat('en-IN').format(orderTotal)}</div>
                     </td>
                     <td>
                       <span className={`${styles.statusBadge} ${

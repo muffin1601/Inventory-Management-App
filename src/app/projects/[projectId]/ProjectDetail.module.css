@@ -66,11 +66,11 @@
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  padding: 0.68rem 0.95rem;
+  padding: 0.48rem 0.75rem;
   background: var(--accent-primary);
   color: #ffffff;
   border: 1px solid var(--accent-primary);
-  font-size: 0.84rem;
+  font-size: 0.74rem;
   font-weight: 900;
 }
 
@@ -84,7 +84,7 @@
   align-items: center;
   justify-content: center;
   gap: 0.45rem;
-  padding: 0.68rem 0.95rem;
+  padding: 0.48rem 0.75rem;
   background: #ffffff;
   color: var(--text-primary);
   border: 1px solid var(--border-color);
@@ -129,7 +129,7 @@
 
 .table th {
   text-align: left;
-  padding: 0.65rem 0.75rem;
+  padding: 0.55rem 0.65rem;
   background: #ffffff;
   font-size: 0.72rem;
   text-transform: uppercase;
@@ -144,14 +144,14 @@
 }
 
 .table td {
-  padding: 0.65rem 0.75rem;
+  padding: 0.55rem 0.65rem;
   border-bottom: 1px solid #eef2f7;
-  font-size: 0.86rem;
+  font-size: 0.76rem;
   vertical-align: middle;
 }
 
 .itemName {
-  font-weight: 900;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
@@ -319,4 +319,42 @@
   .formGrid {
     grid-template-columns: 1fr;
   }
+}
+
+.stockBreakdown {
+  margin-top: 0.5rem;
+  padding: 0.75rem;
+  background: #f8fafc;
+  border: 1px solid var(--border-color);
+}
+
+.stockTotal {
+  font-size: 0.85rem;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.warehouseList {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+
+.warehouseRow {
+  display: flex;
+  justify-content: space-between;
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+}
+
+.warehouseRow strong {
+  color: var(--text-primary);
+}
+
+.noStock {
+  font-size: 0.8rem;
+  color: var(--danger);
+  font-style: italic;
 }
