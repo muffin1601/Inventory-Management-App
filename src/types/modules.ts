@@ -72,6 +72,7 @@ export interface PermissionRow {
     | 'Catalog'
     | 'Stock'
     | 'Inventory'
+    | 'Operations'
     | 'Projects'
     | 'Vendors'
     | 'Orders'

@@ -612,17 +612,21 @@
 
 .actionBtn {
   color: var(--text-secondary);
-  padding: 0;
+  padding: 0 8px;
   transition: all 0.2s;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 4px;
   background: none;
   border: none;
   cursor: pointer;
   min-width: 36px;
   min-height: 36px;
   border-radius: 0;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .actionBtn:hover {
@@ -674,8 +678,9 @@
 
 .inlineActions {
   display: flex;
-  gap: 2px;
+  gap: 4px;
   justify-content: flex-end;
+  flex-wrap: wrap;
   position: relative;
 }
 

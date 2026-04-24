@@ -171,7 +171,7 @@ export default function ProjectsPage() {
         {isLoading ? (
           <div className={styles.empty}>Loading projects...</div>
         ) : filtered.length === 0 ? (
-          <div className={styles.empty}>No projects yet. Click “New Project” to create one.</div>
+          <div className={styles.empty}>No projects yet. Click "New Project" to create one.</div>
         ) : (
           <div className={styles.grid}>
             {filtered.map((project) => (
@@ -254,4 +254,3 @@ export default function ProjectsPage() {
     </div>
   );
 }
-

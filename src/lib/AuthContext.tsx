@@ -42,12 +42,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const initAuth = async () => {
       try {
-        // Set a timeout of 8 seconds - if auth check takes longer, proceed anyway
+        // Set a shorter timeout of 8 seconds
         const timeoutPromise = new Promise<null>((resolve) => {
           timeoutId = setTimeout(() => {
             console.warn('[AuthContext] Initial auth check timeout - proceeding with null user');
             resolve(null);
-          }, 15000);
+          }, 8000);
         });
 
         const authPromise = modulesService.getCurrentUser();
@@ -83,15 +83,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setUser(null);
         setIsLoading(false);
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        // Only fetch fresh user if we're not already loading or if this is a real change
-        if (isLoading) return; 
-
+        // If we are already loading, it's fine to proceed if this is a login event
+        // as the fetch might have been triggered by the login action itself
+        
         try {
           const timeoutPromise = new Promise<null>((resolve) => {
             setTimeout(() => {
               console.warn(`[AuthContext] User fetch timeout after ${event} - using existing state`);
               resolve(null);
-            }, 15000);
+            }, 10000);
           });
 
           const authPromise = modulesService.getCurrentUser();
@@ -99,11 +99,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           
           if (mounted && currentUser) {
             setUser(currentUser);
+            setIsLoading(false); // Ensure loading is cleared if we got a user
           }
         } catch (error) {
           console.error('[AuthContext] Error fetching user after auth change:', error);
         } finally {
           if (mounted) {
+            // Only set loading false if we're not waiting for initAuth anymore
             setIsLoading(false);
           }
         }

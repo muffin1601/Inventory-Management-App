@@ -106,7 +106,7 @@
 .tab {
   padding: 0 0 0.8rem;
   font-size: 0.86rem;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-secondary);
   position: relative;
 }
@@ -195,8 +195,8 @@
   border-bottom: 1px solid var(--border-color);
   background: #f8fafc;
   color: var(--text-secondary);
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: 0.68rem;
+  font-weight: 600;
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
@@ -237,7 +237,7 @@
 }
 
 .userName {
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-primary);
 }
 
@@ -255,9 +255,12 @@
 .permissionTagNeutral {
   display: inline-flex;
   align-items: center;
-  padding: 0.25rem 0.55rem;
-  font-size: 0.74rem;
-  font-weight: 700;
+  padding: 0.2rem 0.45rem;
+  font-size: 0.65rem;
+  font-weight: 600;
+  border-radius: 0;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
 }
 
 .roleBadge,
@@ -268,18 +271,20 @@
 
 .statusActive,
 .permissionTag {
-  background: rgba(34, 197, 94, 0.14);
-  color: #15803d;
+  background: #f0fdf4;
+  border: 1px solid #dcfce7;
+  color: #166534;
 }
 
 .statusDisabled,
 .permissionTagMuted {
-  background: rgba(239, 68, 68, 0.12);
-  color: #b91c1c;
+  background: #fef2f2;
+  border: 1px solid #fee2e2;
+  color: #991b1b;
 }
 
 .permissionCount {
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .actionGroup {
@@ -437,12 +442,57 @@
 .permissionItem {
   display: grid;
   grid-template-columns: 18px 1fr;
-  gap: 0.75rem;
+  gap: 0.55rem;
   align-items: flex-start;
+  cursor: pointer;
+  padding: 0.5rem;
+  border-radius: 0;
+  transition: background 0.15s ease;
+}
+
+.permissionItem:hover {
+  background: #f3f4f6;
+}
+
+/* Custom Checkbox Styling */
+.permissionItem input[type="checkbox"] {
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  border: 1px solid #000;
+  border-radius: 0 !important;
+  background: white;
+  cursor: pointer;
+  position: relative;
+  margin: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.1s ease;
+  flex-shrink: 0;
+}
+
+.permissionItem input[type="checkbox"]:checked {
+  background: #000;
+  border-color: #000;
+}
+
+.permissionItem input[type="checkbox"]:checked::after {
+  content: "\2713";
+  color: white;
+  font-size: 12px;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.permissionItem input[type="checkbox"]:disabled {
+  background: #f3f4f6;
+  border-color: #d1d5db;
+  cursor: not-allowed;
 }
 
 .permissionItem input {
-  margin-top: 0.15rem;
+  margin-top: 0;
 }
 
 .permissionLabel {
@@ -450,13 +500,13 @@
   flex-wrap: wrap;
   gap: 0.4rem;
   align-items: center;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .permissionHint {
   margin-top: 0.15rem;
   color: var(--text-secondary);
-  font-size: 0.78rem;
+  font-size: 0.75rem;
   line-height: 1.45;
 }
 
@@ -545,8 +595,8 @@
   padding: 0.4rem 0.6rem;
   border: 1px solid var(--border-color);
   background: #f8fafc;
-  font-size: 0.78rem;
-  font-weight: 700;
+  font-size: 0.65rem;
+  font-weight: 500;
 }
 
 @media (max-width: 1180px) {

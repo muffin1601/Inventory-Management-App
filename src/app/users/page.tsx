@@ -302,8 +302,12 @@ export default function UsersPage() {
     const inherited = role?.permission_keys.includes(permissionKey) || false;
     const granted = user.custom_permission_keys.includes(permissionKey);
     const revoked = user.revoked_permission_keys?.includes(permissionKey) || false;
+    
+    // Only show as "granted/custom" if it's NOT already inherited
+    const showCustom = granted && !inherited;
     const effective = !revoked && (inherited || granted);
-    return { inherited, granted, revoked, effective };
+    
+    return { inherited, granted: showCustom, revoked, effective };
   }
 
   async function toggleUserPermission(user: UserAccessRow, permissionKey: string) {
@@ -313,17 +317,24 @@ export default function UsersPage() {
 
     if (state.inherited) {
       if (state.revoked) {
+        // Un-revoke (Grant back via inheritance)
         nextRevoked = nextRevoked.filter(k => k !== permissionKey);
       } else {
+        // Revoke inherited permission
         nextRevoked.push(permissionKey);
-        nextCustom = nextCustom.filter(k => k !== permissionKey);
       }
+      // Always remove from custom if it exists in role to prevent redundancy
+      nextCustom = nextCustom.filter(k => k !== permissionKey);
     } else {
-      if (state.granted) {
+      if (state.granted || user.custom_permission_keys.includes(permissionKey)) {
+        // Remove custom grant
         nextCustom = nextCustom.filter(k => k !== permissionKey);
       } else {
+        // Add custom grant
         nextCustom.push(permissionKey);
       }
+      // Ensure it's not in revoked if we are manually granting it
+      nextRevoked = nextRevoked.filter(k => k !== permissionKey);
     }
 
     try {

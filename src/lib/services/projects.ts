@@ -311,24 +311,32 @@ export const projectsService = {
     return { source: 'supabase' as const, project: normalizeProject(update.data as Record<string, unknown>) };
   },
 
-  async deleteProject(projectId: string) {
-    const list = await this.listProjects();
-    if (list.source === 'local') {
-      const next = list.projects.filter((p) => p.id !== projectId);
-      writeLocalProjects(next);
-      return { source: 'local' as const };
+  async deleteProject(projectId: string): Promise<{ source: DataSource }> {
+    // 1. Try to delete from Supabase
+    // Note: We rely on ON DELETE CASCADE in the database for production-level integrity.
+    const response = await supabase.from('projects').delete().eq('id', projectId);
+    
+    if (response.error) {
+      console.error('Database deletion failed:', response.error);
+      
+      // If it's a foreign key error, give a clear instruction
+      if (response.error.code === '23503') {
+        throw new Error('Cannot delete: This project has active challans or BOQ items linked to it.');
+      }
+      
+      if (isMissingTableError(response.error)) {
+        const next = readLocalProjects().filter((p) => p.id !== projectId);
+        writeLocalProjects(next);
+        return { source: 'local' };
+      }
+      throw response.error;
     }
 
-    const soft = await supabase.from('projects').update({ deleted_at: new Date().toISOString() }).eq('id', projectId);
-    if (soft.error) {
-      if (isMissingColumnError(soft.error)) {
-        const hard = await supabase.from('projects').delete().eq('id', projectId);
-        if (hard.error) throw hard.error;
-        return { source: 'supabase' as const };
-      }
-      throw soft.error;
-    }
-    return { source: 'supabase' as const };
+    // 2. Also clean up Local Storage if any exists
+    const nextLocal = readLocalProjects().filter((p) => p.id !== projectId);
+    writeLocalProjects(nextLocal);
+
+    return { source: 'supabase' };
   },
 
   async listBoqItems(projectId: string): Promise<{ source: DataSource; items: BoqItemRecord[]; warning?: string }> {

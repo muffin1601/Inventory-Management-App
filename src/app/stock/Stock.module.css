@@ -75,7 +75,7 @@
   background: #f8fafc;
   font-size: 0.68rem;
   text-transform: uppercase;
-  font-weight: 700;
+  font-weight: 600;
   color: var(--text-secondary);
   border-bottom: 1px solid var(--border-color);
   letter-spacing: 0.05em;
@@ -89,7 +89,7 @@
 }
 
 .itemName {
-  font-weight: 700;
+  font-weight: 500;
   color: var(--text-primary);
   font-size: 0.86rem;
 }
@@ -104,7 +104,7 @@
   display: inline-block;
   padding: 0.18rem 0.45rem;
   font-size: 0.65rem;
-  font-weight: 700;
+  font-weight: 500;
   background: #f3e8ff;
   color: #7e22ce;
   border: 1px solid #e9d5ff;
@@ -114,7 +114,7 @@
 .amountFree,
 .amountDanger {
   text-align: right;
-  font-weight: 700;
+  font-weight: 500;
 }
 
 .amountFree {
@@ -363,4 +363,50 @@
   .modalActions {
     flex-direction: column;
   }
+}
+
+.warningBox {
+  margin-top: 1.5rem;
+  padding: 1.25rem;
+  background: #fffbeb;
+  border: 1px solid #fde68a;
+  border-radius: 4px;
+}
+
+.warningTitle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: #92400e;
+  margin-bottom: 0.5rem;
+}
+
+.warningText {
+  font-size: 0.84rem;
+  color: #b45309;
+  margin-bottom: 1rem;
+  line-height: 1.4;
+}
+
+.warningList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+  gap: 0.75rem;
+}
+
+.warningItem {
+  font-size: 0.8rem;
+  color: #92400e;
+  background: rgba(255, 255, 255, 0.5);
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgba(251, 191, 36, 0.3);
+}
+
+.warningMore {
+  font-size: 0.8rem;
+  color: #d97706;
+  font-weight: 600;
+  padding: 0.5rem;
 }

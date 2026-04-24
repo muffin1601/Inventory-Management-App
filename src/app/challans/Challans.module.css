@@ -188,13 +188,17 @@
 .actionBtn {
   background: none;
   border: none;
-  padding: 0.35rem;
+  padding: 0.35rem 0.45rem;
   color: var(--text-muted);
   cursor: pointer;
   transition: none;
-  display: flex;
+  display: inline-flex;
   align-items: center;
   justify-content: center;
+  gap: 0.25rem;
+  font-size: 0.72rem;
+  font-weight: 700;
+  white-space: nowrap;
 }
 
 .actionBtn:hover {

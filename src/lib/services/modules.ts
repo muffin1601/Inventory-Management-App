@@ -57,6 +57,9 @@ export const modulesService = {
   getOrders: dbService.getOrders.bind(dbService),
   getChallans: dbService.getChallans.bind(dbService),
   saveChallans: dbService.saveChallans.bind(dbService),
+  createChallan: dbService.createChallan.bind(dbService),
+  updateChallanStatus: dbService.updateChallanStatus.bind(dbService),
+  deleteChallan: dbService.deleteChallan.bind(dbService),
   getDeliveryReceipts: dbService.getDeliveryReceipts.bind(dbService),
   saveDeliveryReceipts: dbService.saveDeliveryReceipts.bind(dbService),
   getPaymentSlips: dbService.getPaymentSlips.bind(dbService),
@@ -68,6 +71,6 @@ export const modulesService = {
   },
 
   _debugShowState: async () => {
-    await (dbService as any)._debugShowState?.();
+    console.warn('Debug state viewer is not implemented for the database service.');
   },
 };

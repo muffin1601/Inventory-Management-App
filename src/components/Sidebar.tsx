@@ -14,10 +14,8 @@ import {
   ShoppingCart,
   FileText,
   UploadCloud,
-  History,
   Shield,
   ArrowRightLeft,
-  CreditCard,
   Truck,
   PanelLeftClose,
   PanelLeftOpen,
@@ -25,52 +23,61 @@ import {
 import React from 'react';
 import { modulesService } from '@/lib/services/modules';
 
+type NavItem = {
+  name: string;
+  path: string;
+  icon: React.ReactNode;
+};
+
+type NavGroup = {
+  label: string;
+  items: NavItem[];
+};
+
+const NAV_GROUPS: NavGroup[] = [
+  {
+    label: 'Main',
+    items: [
+      { name: 'Dashboard', path: '/dashboard', icon: <Home size={18} strokeWidth={1.5} color="currentColor" /> },
+    ],
+  },
+  {
+    label: 'Inventory & Projects',
+    items: [
+      { name: 'Item Catalog', path: '/catalog', icon: <Box size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Stock Management', path: '/stock', icon: <Boxes size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Inventory Flow', path: '/inventory', icon: <ArrowRightLeft size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Projects & BOQ', path: '/projects', icon: <Building2 size={18} strokeWidth={1.5} color="currentColor" /> },
+    ],
+  },
+  {
+    label: 'Procurement',
+    items: [
+      { name: 'Vendors', path: '/vendors', icon: <Users size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Purchase Orders', path: '/orders', icon: <ShoppingCart size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Rate Inquiry', path: '/rate-inquiry', icon: <ClipboardList size={18} strokeWidth={1.5} color="currentColor" /> },
+    ],
+  },
+  {
+    label: 'Operations',
+    items: [
+      { name: 'Delivery & Payments', path: '/site-records', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Dispatch Challans', path: '/challans', icon: <Truck size={18} strokeWidth={1.5} color="currentColor" /> },
+    ],
+  },
+  {
+    label: 'Reports & Admin',
+    items: [
+      { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'User Management', path: '/users', icon: <Shield size={18} strokeWidth={1.5} color="currentColor" /> },
+    ],
+  },
+];
+
 export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; onToggle: () => void }) {
   const pathname = usePathname();
 
-  const navGroups = [
-    {
-      label: 'Main',
-      items: [
-        { name: 'Dashboard', path: '/dashboard', icon: <Home size={18} strokeWidth={1.5} color="currentColor" /> },
-      ],
-    },
-    {
-      label: 'Inventory & Projects',
-      items: [
-        { name: 'Item Catalog', path: '/catalog', icon: <Box size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Stock Management', path: '/stock', icon: <Boxes size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Inventory Flow', path: '/inventory', icon: <ArrowRightLeft size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Projects & BOQ', path: '/projects', icon: <Building2 size={18} strokeWidth={1.5} color="currentColor" /> },
-      ],
-    },
-    {
-      label: 'Procurement',
-      items: [
-        { name: 'Vendors', path: '/vendors', icon: <Users size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Purchase Orders', path: '/orders', icon: <ShoppingCart size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Rate Inquiry', path: '/rate-inquiry', icon: <ClipboardList size={18} strokeWidth={1.5} color="currentColor" /> },
-      ],
-    },
-    {
-      label: 'Operations',
-      items: [
-        { name: 'Payment Records', path: '/site-records', icon: <FileText size={18} strokeWidth={1.5} color="currentColor" /> },
-        // { name: 'Payments', path: '/payments', icon: <CreditCard size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'Challans', path: '/challans', icon: <Truck size={18} strokeWidth={1.5} color="currentColor" /> },
-      ],
-    },
-    {
-      label: 'Reports & Admin',
-      items: [
-        { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="currentColor" /> },
-        // { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="currentColor" /> },
-        { name: 'User Management', path: '/users', icon: <Shield size={18} strokeWidth={1.5} color="currentColor" /> },
-      ],
-    },
-  ];
-
-  const visibleNavGroups = navGroups;
+  const [visibleNavGroups, setVisibleNavGroups] = React.useState<NavGroup[]>([]);
   const [currentUserLabel, setCurrentUserLabel] = React.useState<{
     name: string;
     role: string;
@@ -79,24 +86,55 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
   } | null>(null);
 
   React.useEffect(() => {
-    const syncCurrentUser = async () => {
+    let mounted = true;
+
+    const syncCurrentUserAndAccess = async () => {
       const current = (await modulesService.getAuthenticatedUser()) || await modulesService.getCurrentUser();
-      if (current) {
-        setCurrentUserLabel({
-          name: current.full_name,
-          role: current.role_name,
-          email: current.email,
-          initial: current.full_name.charAt(0).toUpperCase(),
-        });
+      if (!mounted) return;
+
+      if (!current) {
+        setCurrentUserLabel(null);
+        setVisibleNavGroups([]);
+        return;
+      }
+
+      setCurrentUserLabel({
+        name: current.full_name,
+        role: current.role_name,
+        email: current.email,
+        initial: current.full_name.charAt(0).toUpperCase(),
+      });
+
+      const nextGroups = await Promise.all(
+        NAV_GROUPS.map(async (group) => {
+          const items = await Promise.all(
+            group.items.map(async (item) => {
+              const allowed = await modulesService.canAccessRoute(current, item.path);
+              return allowed ? item : null;
+            }),
+          );
+
+          return {
+            ...group,
+            items: items.filter((item): item is NavItem => item !== null),
+          };
+        }),
+      );
+
+      if (mounted) {
+        setVisibleNavGroups(nextGroups.filter((group) => group.items.length > 0));
       }
     };
 
-    void syncCurrentUser();
-    window.addEventListener('ims-current-user-changed', syncCurrentUser);
-    window.addEventListener('ims-users-changed', syncCurrentUser);
+    void syncCurrentUserAndAccess();
+    window.addEventListener('ims-current-user-changed', syncCurrentUserAndAccess);
+    window.addEventListener('ims-users-changed', syncCurrentUserAndAccess);
+    window.addEventListener('ims-auth-changed', syncCurrentUserAndAccess);
     return () => {
-      window.removeEventListener('ims-current-user-changed', syncCurrentUser);
-      window.removeEventListener('ims-users-changed', syncCurrentUser);
+      mounted = false;
+      window.removeEventListener('ims-current-user-changed', syncCurrentUserAndAccess);
+      window.removeEventListener('ims-users-changed', syncCurrentUserAndAccess);
+      window.removeEventListener('ims-auth-changed', syncCurrentUserAndAccess);
     };
   }, []);
 
@@ -109,29 +147,26 @@ export default function Sidebar({ collapsed, onToggle }: { collapsed: boolean; o
       </div>
 
       <nav className={styles.nav}>
-        {visibleNavGroups.map((group) => {
+        {visibleNavGroups.map((group) => (
+          <div key={group.label} className={styles.navGroup}>
+            <span className={styles.navLabel}>{collapsed ? '*' : group.label}</span>
+            {group.items.map((item) => {
+              const isActive = pathname === item.path;
 
-          return (
-            <div key={group.label} className={styles.navGroup}>
-              <span className={styles.navLabel}>{collapsed ? '•' : group.label}</span>
-              {group.items.map((item) => {
-                const isActive = pathname === item.path;
-
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.path}
-                    className={`${styles.navItem} ${isActive ? styles.active : ''} ${collapsed ? styles.navItemCollapsed : ''}`}
-                    title={item.name}
-                  >
-                    {item.icon}
-                    <span className={collapsed ? styles.navTextHidden : ''}>{item.name}</span>
-                  </Link>
-                );
-              })}
-            </div>
-          );
-        })}
+              return (
+                <Link
+                  key={item.name}
+                  href={item.path}
+                  className={`${styles.navItem} ${isActive ? styles.active : ''} ${collapsed ? styles.navItemCollapsed : ''}`}
+                  title={item.name}
+                >
+                  {item.icon}
+                  <span className={collapsed ? styles.navTextHidden : ''}>{item.name}</span>
+                </Link>
+              );
+            })}
+          </div>
+        ))}
       </nav>
 
       <div className={styles.footer}>

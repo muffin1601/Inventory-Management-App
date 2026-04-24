@@ -9,6 +9,7 @@ import {
   Pencil,
   Trash2,
   X,
+  AlertCircle,
 } from 'lucide-react';
 import { inventoryService } from '@/lib/services/inventory';
 import { modulesService } from '@/lib/services/modules';
@@ -250,13 +251,17 @@ export default function StockPage() {
       }
 
       let remainingBoq = boqReservedByVariant.get(variant.id) || 0;
+      
       return variant.stock_data.map((stockRow, index) => {
         const warehouseKey = `${variant.id}::${stockRow.warehouse_id || ''}`;
         const orderPromised = promisedMap.get(warehouseKey) || 0;
+        
+        // BOQ items are usually project-specific but we allocate from available stock
         const availableForBoq = Math.max(stockRow.quantity - orderPromised, 0);
         const boqAllocated = Math.min(availableForBoq, remainingBoq);
         remainingBoq = Math.max(remainingBoq - boqAllocated, 0);
-        const promised = orderPromised + boqAllocated;
+        
+        const totalPromised = orderPromised + boqAllocated;
 
         return {
           rowKey: `${variant.id}-${stockRow.warehouse_id || index}`,
@@ -270,13 +275,27 @@ export default function StockPage() {
           warehouseName: stockRow.warehouse_name,
           unit,
           stock: stockRow.quantity,
-          promised,
-          free: stockRow.quantity - promised,
+          promised: totalPromised,
+          free: stockRow.quantity - totalPromised,
           attributes: variant.attributes,
         };
       });
     })
   ), [boqReservedByVariant, filteredVariants, promisedMap]);
+
+  // Track which BOQ items are NOT matched to any inventory product
+  const unmatchedBoqItems = useMemo(() => {
+    return boqItems.filter(item => {
+      const remaining = item.quantity - (item.delivered || 0);
+      if (remaining <= 0) return false;
+      
+      const hasMatch = variants.some(v => 
+        (item.variant_id && v.id === item.variant_id) || 
+        matchesBoqItem(v, item)
+      );
+      return !hasMatch;
+    });
+  }, [boqItems, variants]);
 
   const paginatedStockRows = useMemo(() => {
     const startIndex = (page - 1) * pageSize;
@@ -562,8 +581,9 @@ export default function StockPage() {
                   paginatedStockRows.map((row) => (
                     <tr key={row.rowKey}>
                       <td>
-                        <div className={styles.itemName}>{row.productName}</div>
-                        <div className={styles.itemMeta}>Variant of {row.variantSummary}</div>
+                        <div className={styles.itemName}>
+                          {row.productName} ({row.variantSummary})
+                        </div>
                       </td>
                       <td>{row.manufacturer}</td>
                       <td>{row.warehouseName === '-' ? '-' : <span className={styles.chip}>{row.warehouseName}</span>}</td>
@@ -615,6 +635,26 @@ export default function StockPage() {
               itemLabel="stock rows"
             />
           </div>
+
+          {unmatchedBoqItems.length > 0 && (
+            <div className={styles.warningBox}>
+              <div className={styles.warningTitle}>
+                <AlertCircle size={16} /> Unmatched BOQ Items ({unmatchedBoqItems.length})
+              </div>
+              <p className={styles.warningText}>
+                The following items are in project BOQs but don't match any inventory product name/SKU. 
+                They are NOT being counted in the "Promised" stock above.
+              </p>
+              <div className={styles.warningList}>
+                {unmatchedBoqItems.slice(0, 5).map(item => (
+                  <div key={item.id} className={styles.warningItem}>
+                    • {item.item_name} ({item.quantity - (item.delivered || 0)} {item.unit} remaining)
+                  </div>
+                ))}
+                {unmatchedBoqItems.length > 5 && <div className={styles.warningMore}>+ {unmatchedBoqItems.length - 5} more...</div>}
+              </div>
+            </div>
+          )}
         </div>
 
         <aside className={styles.sidePanel}>

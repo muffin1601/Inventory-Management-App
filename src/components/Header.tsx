@@ -17,7 +17,7 @@ const TITLE_MAP: Record<string, string> = {
   '/vendors': 'Vendors',
   '/rate-inquiry': 'Rate Inquiry',
   '/rate-comparison': 'Rate Comparison',
-  '/challans': 'Challans & Dispatch',
+  '/challans': 'Dispatch Challans',
   '/site-records': 'Delivery & Payments',
   '/audit': 'Audit Trail',
   '/reports': 'Reports & Export',
@@ -28,8 +28,7 @@ export default function Header() {
   const pathname = usePathname();
   const router = useRouter();
   const [currentUser, setCurrentUser] = React.useState<UserAccessRow | null>(null);
-  
-  // Create a formatted title from pathname
+
   const normalizedPath = pathname.startsWith('/projects') ? '/projects' : pathname;
   const title =
     TITLE_MAP[normalizedPath] ||
@@ -43,7 +42,7 @@ export default function Header() {
       setCurrentUser(user);
     };
 
-    syncUser();
+    void syncUser();
     window.addEventListener('ims-current-user-changed', syncUser);
     window.addEventListener('ims-users-changed', syncUser);
     window.addEventListener('ims-auth-changed', syncUser);
@@ -55,17 +54,15 @@ export default function Header() {
   }, []);
 
   const userLabel = currentUser
-    ? `${currentUser.full_name} • ${currentUser.role_name}`
+    ? `${currentUser.full_name} - ${currentUser.role_name}`
     : 'Not signed in';
 
   return (
     <header className={styles.mainHeader}>
       <div className={styles.headerTitleWrap}>
-        <div className={styles.headerTitle}>
-          {title}
-        </div>
+        <div className={styles.headerTitle}>{title}</div>
       </div>
-      
+
       <div className={styles.headerActions}>
         <div className={styles.currentUserBadge}>
           <ShieldCheck size={15} />
@@ -78,7 +75,7 @@ export default function Header() {
           className={styles.iconButton}
           title="Logout"
           onClick={() => {
-            modulesService.logout();
+            void modulesService.logout();
             router.replace('/login');
           }}
         >

@@ -207,9 +207,21 @@ export default function OrdersPage() {
       const entityName = (order.vendor_name || order.entity_name || '').toLowerCase();
       const projectName = (order.project_name || '').toLowerCase();
       const itemMatches = (order.items || []).some((item) => item.sku.toLowerCase().includes(query) || item.product_name.toLowerCase().includes(query));
-      const hit = order.order_number.toLowerCase().includes(query) || entityName.includes(query) || projectName.includes(query) || itemMatches || (order.sku || '').toLowerCase().includes(query);
+      
+      const hit = order.order_number.toLowerCase().includes(query) || 
+                  entityName.includes(query) || 
+                  projectName.includes(query) || 
+                  itemMatches || 
+                  (order.sku || '').toLowerCase().includes(query);
+                  
       const hitType = typeFilter === 'ALL' || order.type === typeFilter;
-      const hitStatus = statusFilter === 'ALL' || order.status === statusFilter;
+      
+      // Default 'ALL' view should NOT show cancelled orders to prevent clutter
+      const isCancelled = order.status === 'cancelled';
+      const hitStatus = statusFilter === 'ALL' 
+        ? !isCancelled 
+        : order.status === statusFilter;
+        
       return hit && hitType && hitStatus;
     });
   }, [orders, search, statusFilter, typeFilter]);
@@ -347,7 +359,7 @@ export default function OrdersPage() {
     if (!confirmed.confirmed) return;
 
     try {
-      await modulesService.createOrder({
+      const createdOrder = await modulesService.createOrder({
         type: 'PURCHASE',
         vendor_id: vendor.id,
         vendor_name: vendor.name,
@@ -374,8 +386,7 @@ export default function OrdersPage() {
         payment_terms: draft.payment_terms,
       });
 
-      const res = await modulesService.getOrders();
-      const newOrder = res.find(o => o.order_number === (res as any).order_number) || res[0];
+      const newOrder = createdOrder;
 
       // Log Audit
       await modulesService.addAudit({
@@ -481,7 +492,7 @@ export default function OrdersPage() {
       console.error('Failed to add audit:', error);
     }
 
-    await modulesService.updateOrderStatus(order.id, 'APPROVED');
+    await modulesService.updateOrderStatus(order.id, 'approved');
     await refreshOrders();
 
     if (inventoryErrors) {
@@ -563,8 +574,7 @@ export default function OrdersPage() {
     }
 
     try {
-      // Use CANCELLED status for rejected orders
-      await modulesService.updateOrderStatus(order.id, 'CANCELLED');
+      await modulesService.updateOrderStatus(order.id, 'cancelled');
       await refreshOrders();
       showToast('Order rejected successfully.', 'info');
     } catch (error) {
@@ -595,7 +605,7 @@ export default function OrdersPage() {
       });
 
       // Mark order as cancelled (soft delete)
-      await modulesService.updateOrderStatus(order.id, 'CANCELLED');
+      await modulesService.updateOrderStatus(order.id, 'cancelled');
 
       // Refresh the orders list
       await refreshOrders();
@@ -824,6 +834,11 @@ export default function OrdersPage() {
           </div>
 
           <div className={styles.bulkModalBody}>
+            <div style={{ display: 'grid', gap: '0.75rem', marginBottom: '1rem' }}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                <span>Step 1</span>
+                <span>Select vendor and project</span>
+              </div>
             <div className={styles.createGrid}>
               <div>
                 <label className={styles.fieldLabel}>Vendor</label>
@@ -869,9 +884,14 @@ export default function OrdersPage() {
                 </select>
               </div>
             </div>
+            </div>
 
             {draft.vendor_id && (
               <div className={styles.vendorDetailsSection}>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                  <span>Step 2</span>
+                  <span>Confirm delivery and payment details</span>
+                </div>
                 <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
                   <div>
                     <label className={styles.fieldLabel}>Delivery Address</label>
@@ -899,6 +919,10 @@ export default function OrdersPage() {
 
             <div className={styles.lineHeader}>
               <div>
+                <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.5rem', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+                  <span>Step 3</span>
+                  <span>Add items and quantities</span>
+                </div>
                 <h3 className={styles.title} style={{ fontSize: '1rem', margin: 0 }}>Order Lines</h3>
                 <p className={styles.helperText} style={{ margin: '0.5rem 0 0 0' }}>
                   Select a product variant to auto-fill unit, warehouse, price, and available stock. Keep quantities within stock limits.
@@ -1039,6 +1063,10 @@ export default function OrdersPage() {
               Each purchase order can include multiple variant rows. Quantities are validated against total available stock.
             </p>
 
+            <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', margin: '1rem 0 0.75rem 0', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase' }}>
+              <span>Step 4</span>
+              <span>Review totals and create the purchase order</span>
+            </div>
             <div className={styles.orderSummary}>
               <div className={styles.summaryItem}>
                 <span>Subtotal</span>
@@ -1077,7 +1105,7 @@ export default function OrdersPage() {
                 style={{ fontSize: '1.5rem', padding: '0' }}
                 title="Close"
               >
-                ✕
+                Close
               </button>
             </div>
             <div className={styles.bulkModalBody}>
@@ -1140,10 +1168,10 @@ export default function OrdersPage() {
               <button
                 className={styles.actionBtn}
                 onClick={() => setSelectedPO(null)}
-                style={{ fontSize: '1.5rem', padding: '0' }}
+                style={{ fontSize: '1rem' }}
                 title="Close"
               >
-                ✕
+                Close
               </button>
             </div>
             <div className={styles.bulkModalBody} style={{ padding: '1.5rem' }}>
@@ -1181,10 +1209,10 @@ export default function OrdersPage() {
                             <strong>{item.product_name}</strong>
                           </td>
                           <td style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>{item.quantity}</td>
-                          <td style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>₹{item.price}</td>
+                          <td style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>Rs. {item.price}</td>
                           <td style={{ padding: '0.75rem', textAlign: 'center', borderBottom: '1px solid var(--border-color)' }}>{item.gst_rate || 0}%</td>
                           <td style={{ padding: '0.75rem', textAlign: 'right', borderBottom: '1px solid var(--border-color)', fontWeight: '600' }}>
-                            ₹{new Intl.NumberFormat("en-IN", { style: "decimal", maximumFractionDigits: 2 }).format(baseAmount + gstAmount)}
+                            Rs. {new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(baseAmount + gstAmount)}
                           </td>
                         </tr>
                       );
@@ -1192,11 +1220,12 @@ export default function OrdersPage() {
                   </tbody>
                 </table>
               </div>
-
               <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '1.5rem' }}>
                 <div style={{ minWidth: '250px' }}>
                   {(() => {
-                    const subtotal = (selectedPO.items || []).reduce((sum, item) => sum + ((item.price || 0) * (item.quantity || 0)), 0);
+                    const subtotal = (selectedPO.items || []).reduce((sum, item) => {
+                      return sum + ((item.price || 0) * (item.quantity || 0));
+                    }, 0);
                     const totalGst = (selectedPO.items || []).reduce((sum, item) => {
                       const baseAmount = (item.price || 0) * (item.quantity || 0);
                       return sum + (baseAmount * ((item.gst_rate || 0) / 100));
@@ -1206,19 +1235,19 @@ export default function OrdersPage() {
                       <>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)' }}>
                           <span>Subtotal:</span>
-                          <strong>₹{new Intl.NumberFormat("en-IN", { style: "decimal", maximumFractionDigits: 2 }).format(subtotal)}</strong>
+                          <strong>Rs. {new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(subtotal)}</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)' }}>
                           <span>GST:</span>
-                          <strong>₹{new Intl.NumberFormat("en-IN", { style: "decimal", maximumFractionDigits: 2 }).format(totalGst)}</strong>
+                          <strong>Rs. {new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(totalGst)}</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem', paddingBottom: '0.5rem', borderBottom: '1px solid var(--border-color)' }}>
                           <span>Transport:</span>
-                          <strong>₹0</strong>
+                          <strong>Rs. 0</strong>
                         </div>
                         <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '1.1rem', fontWeight: '700' }}>
                           <span>Grand Total:</span>
-                          <strong>₹{new Intl.NumberFormat("en-IN", { style: "decimal", maximumFractionDigits: 2 }).format(grandTotal)}</strong>
+                          <strong>Rs. {new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(grandTotal)}</strong>
                         </div>
                       </>
                     );
@@ -1239,7 +1268,6 @@ export default function OrdersPage() {
         </div>
       )}
 
-
       <div className={styles.card}>
         <div className={styles.toolbar}>
           <div className={styles.searchBox}>
@@ -1249,9 +1277,9 @@ export default function OrdersPage() {
           <div className={styles.filters}>
             <select className={styles.select} value={statusFilter} onChange={(e) => setStatusFilter(e.target.value as 'ALL' | OrderRow['status'])}>
               <option value="ALL">All Status</option>
-              <option value="APPROVED">Approved</option>
-              <option value="PENDING">Pending</option>
-              <option value="CANCELLED">Cancelled</option>
+              <option value="approved">Approved</option>
+              <option value="pending_approval">Pending Approval</option>
+              <option value="cancelled">Cancelled</option>
             </select>
             <button className={styles.iconButton}><Filter size={18} /></button>
           </div>
@@ -1273,110 +1301,118 @@ export default function OrdersPage() {
             {filteredOrders.length === 0 ? (
               <tr>
                 <td colSpan={7} style={{ textAlign: 'center', padding: '2.5rem', color: 'var(--text-secondary)' }}>
-                  No purchase orders found. Use New Purchase Order to start.
+                  No purchase orders found yet.
+                  {canCreate ? ' Click "New Purchase Order" to create your first order.' : ' Ask an admin for access if you need to create one.'}
                 </td>
               </tr>
-            ) : paginatedOrders.map((order, index) => {
-              const displayName = order.vendor_name || order.entity_name || 'Unknown';
-              const orderTotal = (order.items || []).reduce((sum, item) => {
-                const baseAmount = (item.price || 0) * (item.quantity || 0);
-                const gstAmount = baseAmount * ((item.gst_rate || 0) / 100);
-                return sum + baseAmount + gstAmount;
-              }, 0);
-              const isPending = order.status === 'pending_approval';
-              return (
-                <tr key={order.id}>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{(page - 1) * pageSize + index + 1}</td>
-                  <td><div style={{ fontWeight: 800 }}>{order.order_number}</div></td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{displayName}</div>
-                    {order.project_name && (
-                      <div style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>{order.project_name}</div>
-                    )}
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 700 }}>₹{new Intl.NumberFormat("en-IN").format(orderTotal)}</div>
-                  </td>
-                  <td>
-                    <span className={`${styles.statusBadge} ${
-                      order.status === 'approved' ? styles.statusApproved : 
-                      order.status === 'cancelled' ? styles.statusCancelled : styles.statusPending
-                    }`}>
-                      {order.status === 'pending_approval' ? 'Pending Approval' : 
-                       order.status === 'approved' ? 'Approved' : 
-                       order.status === 'cancelled' ? 'Rejected' : order.status}
-                    </span>
-                  </td>
-                  <td>{new Date(order.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
-                  <td>
-                    <div className={styles.inlineActions}>
-                      {isPending && canApprove && (
-                        <button className={`${styles.miniBtn} ${styles.miniApprove}`} onClick={() => approveOrder(order)} title="Quick Approve">
-                          <Check size={12} />
-                        </button>
+            ) : (
+              paginatedOrders.map((order, index) => {
+                const displayName = order.vendor_name || order.entity_name || 'Unknown';
+                const orderTotal = (order.items || []).reduce((sum, item) => {
+                  const baseAmount = (item.price || 0) * (item.quantity || 0);
+                  const gstAmount = baseAmount * ((item.gst_rate || 0) / 100);
+                  return sum + baseAmount + gstAmount;
+                }, 0);
+                const isPending = order.status === 'pending_approval';
+                return (
+                  <tr key={order.id}>
+                    <td style={{ color: 'var(--text-muted)', fontSize: '0.7rem' }}>{(page - 1) * pageSize + index + 1}</td>
+                    <td><div style={{ fontWeight: 800 }}>{order.order_number}</div></td>
+                    <td>
+                      <div style={{ fontWeight: 600 }}>{displayName}</div>
+                      {order.project_name && (
+                        <div style={{ fontSize: '0.7rem', color: 'var(--accent-blue)' }}>{order.project_name}</div>
                       )}
-                      {isPending && canCancel && (
-                        <button className={`${styles.miniBtn} ${styles.miniReject}`} onClick={() => rejectOrder(order)} title="Quick Reject">
-                          <X size={12} />
-                        </button>
-                      )}
-                      <button className={styles.actionBtn} title="View details" onClick={() => setSelectedPO(order)}>
-                        <Eye size={16} />
-                      </button>
-                      <button className={styles.actionBtn} title="Download PDF" onClick={() => downloadPDF(order)}>
-                        <Printer size={16} />
-                      </button>
-                      <div className={styles.statusActionWrapper}>
-                        <button
-                          className={styles.actionBtn}
-                          title="Change Status"
-                          type="button"
-                          onClick={() => setStatusDropdownOrderId(statusDropdownOrderId === order.id ? null : order.id)}
-                        >
-                          <Settings size={16} />
-                        </button>
-                        {statusDropdownOrderId === order.id && (
-                          <div className={styles.statusDropdownMenu} onMouseLeave={() => setStatusDropdownOrderId(null)}>
-                            {['pending_approval', 'approved', 'cancelled']
-                              .filter((status) => status !== order.status)
-                              .map((status) => {
-                                const statusLabels: Record<string, string> = {
-                                  pending_approval: 'Pending Approval',
-                                  approved: 'Approved',
-                                  cancelled: 'Rejected',
-                                };
-                                return (
-                                  <button
-                                    key={status}
-                                    type="button"
-                                    className={styles.statusOption}
-                                    onClick={async () => {
-                                      const conf = await confirmAction({
-                                        title: `Change status to ${statusLabels[status]}?`,
-                                        message: `Current: ${statusLabels[order.status] || order.status}\nNew: ${statusLabels[status]}`,
-                                        confirmText: 'Change',
-                                      });
-                                      setStatusDropdownOrderId(null);
-                                      if (conf.confirmed) {
-                                        await changeOrderStatus(order, status);
-                                      }
-                                    }}
-                                  >
-                                    {statusLabels[status]}
-                                  </button>
-                                );
-                              })}
-                          </div>
+                    </td>
+                    <td>
+                      <div style={{ fontWeight: 700 }}>Rs. {new Intl.NumberFormat('en-IN').format(orderTotal)}</div>
+                    </td>
+                    <td>
+                      <span className={`${styles.statusBadge} ${
+                        order.status === 'approved' ? styles.statusApproved :
+                        order.status === 'cancelled' ? styles.statusCancelled : styles.statusPending
+                      }`}>
+                        {order.status === 'pending_approval' ? 'Pending Approval' :
+                         order.status === 'approved' ? 'Approved' :
+                         order.status === 'cancelled' ? 'Rejected' : order.status}
+                      </span>
+                    </td>
+                    <td>{new Date(order.created_at).toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' })}</td>
+                    <td>
+                      <div className={styles.inlineActions}>
+                        {isPending && canApprove && (
+                          <button className={`${styles.miniBtn} ${styles.miniApprove}`} onClick={() => approveOrder(order)} title="Quick Approve">
+                            <Check size={12} />
+                          </button>
                         )}
+                        {isPending && canCancel && (
+                          <button className={`${styles.miniBtn} ${styles.miniReject}`} onClick={() => rejectOrder(order)} title="Quick Reject">
+                            <X size={12} />
+                          </button>
+                        )}
+                        <button className={styles.actionBtn} title="View Order" aria-label={`View ${order.order_number}`} onClick={() => setSelectedPO(order)}>
+                          <Eye size={16} />
+                          <span>View</span>
+                        </button>
+                        <button className={styles.actionBtn} title="Print Order" aria-label={`Print ${order.order_number}`} onClick={() => downloadPDF(order)}>
+                          <Printer size={16} />
+                          <span>Print</span>
+                        </button>
+                        <div className={styles.statusActionWrapper}>
+                          <button
+                            className={styles.actionBtn}
+                            title="Change Status"
+                            aria-label={`Change status for ${order.order_number}`}
+                            type="button"
+                            onClick={() => setStatusDropdownOrderId(statusDropdownOrderId === order.id ? null : order.id)}
+                          >
+                            <Settings size={16} />
+                            <span>Status</span>
+                          </button>
+                          {statusDropdownOrderId === order.id && (
+                            <div className={styles.statusDropdownMenu} onMouseLeave={() => setStatusDropdownOrderId(null)}>
+                              {['pending_approval', 'approved', 'cancelled']
+                                .filter((status) => status !== order.status)
+                                .map((status) => {
+                                  const statusLabels: Record<string, string> = {
+                                    pending_approval: 'Pending Approval',
+                                    approved: 'Approved',
+                                    cancelled: 'Rejected',
+                                  };
+                                  return (
+                                    <button
+                                      key={status}
+                                      type="button"
+                                      className={styles.statusOption}
+                                      onClick={async () => {
+                                        const conf = await confirmAction({
+                                          title: `Change status to ${statusLabels[status]}?`,
+                                          message: `Current: ${statusLabels[order.status] || order.status}\nNew: ${statusLabels[status]}`,
+                                          confirmText: 'Change',
+                                        });
+                                        setStatusDropdownOrderId(null);
+                                        if (conf.confirmed) {
+                                          await changeOrderStatus(order, status);
+                                        }
+                                      }}
+                                    >
+                                      {statusLabels[status]}
+                                    </button>
+                                  );
+                                })}
+                            </div>
+                          )}
+                        </div>
+                        <button className={styles.actionBtn} title="Delete Order" aria-label={`Delete ${order.order_number}`} onClick={() => deletePurchaseOrder(order)}>
+                          <Trash2 size={14} />
+                          <span>Delete</span>
+                        </button>
                       </div>
-                      <button className={styles.actionBtn} title="Delete" onClick={() => deletePurchaseOrder(order)}>
-                        <Trash2 size={14} />
-                      </button>
-                    </div>
-                  </td>
-                </tr>
-              );
-            })}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
           </tbody>
         </table>
 

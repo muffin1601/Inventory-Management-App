@@ -4,9 +4,10 @@ import React, { useState, useEffect } from 'react';
 import styles from './Challans.module.css';
 import { 
   Search, Filter, Truck, CheckCircle2, Clock,
-  Eye, Trash2, FileText, Printer
+  Eye, Trash2, FileText, Printer, AlertCircle
 } from 'lucide-react';
 import { useUi } from '@/components/ui/AppProviders';
+import { useAuth } from '@/lib/AuthContext';
 import TablePagination from '@/components/ui/TablePagination';
 import { projectsService, type ProjectRecord } from '@/lib/services/projects';
 import { modulesService } from '@/lib/services/modules';
@@ -14,8 +15,18 @@ import type { ChallanRow as Challan } from '@/types/modules';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
+// Generate sequential challan number with date-based prefix
+function generateChallanNumber(existingCount: number): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const sequence = String(existingCount + 1).padStart(4, '0');
+  return `CH-${year}-${month}-${sequence}`;
+}
+
 export default function ChallansPage() {
   const { showToast, confirmAction } = useUi();
+  const { user, isClient } = useAuth();
   const [challans, setChallans] = useState<Challan[]>([]);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('ALL');
@@ -26,61 +37,37 @@ export default function ChallansPage() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [dispatchItems, setDispatchItems] = useState<any[]>([]);
   const [loadingBoq, setLoadingBoq] = useState(false);
+  const [isLoading, setIsLoading] = useState(true);
+  const [isSaving, setIsSaving] = useState(false);
   const [newChallan, setNewChallan] = useState<Partial<Challan>>({
     status: 'ISSUED',
     items: []
   });
 
-  // Load projects and inventory
+  // Load projects and challans on mount
   useEffect(() => {
+    if (!isClient || !user) return;
+
     const loadData = async () => {
-      const projRes = await projectsService.listProjects();
-      setProjects(projRes.projects);
-    };
-    loadData();
-
-    void (async () => {
-      const saved = await modulesService.getChallans();
-      if (saved.length > 0) {
-        setChallans(saved);
-        return;
+      try {
+        setIsLoading(true);
+        const [projRes, challansRes] = await Promise.all([
+          projectsService.listProjects(),
+          modulesService.getChallans()
+        ]);
+        
+        setProjects(projRes.projects);
+        setChallans(challansRes);
+      } catch (error) {
+        console.error('Error loading data:', error);
+        showToast('Failed to load challans', 'error');
+      } finally {
+        setIsLoading(false);
       }
+    };
 
-      // Mock data for first load
-      const mock: Challan[] = [
-        {
-          id: '1',
-          challan_no: 'CH-2024-001',
-          po_no: 'PO-WAT-881',
-          project_name: 'DLF Cyber Park',
-          vendor_name: 'Delta Valve House',
-          dispatch_date: '2024-03-15',
-          status: 'DELIVERED',
-          items: [
-            { id: '1', name: 'Gate Valve 150mm', quantity: 15, unit: 'Nos' },
-            { id: '2', name: 'Check Valve 100mm', quantity: 5, unit: 'Nos' },
-          ],
-        },
-        {
-          id: '2',
-          challan_no: 'CH-2024-002',
-          po_no: 'PO-WAT-892',
-          project_name: 'Oberoi Realty',
-          vendor_name: 'Clearline Pumps',
-          dispatch_date: '2024-03-20',
-          status: 'DISPATCHED',
-          items: [{ id: '3', name: 'Vertical Multistage Pump', quantity: 2, unit: 'Sets' }],
-        },
-      ];
-      setChallans(mock);
-      modulesService.saveChallans(mock);
-    })();
-  }, []);
-
-  const saveChallans = (updated: Challan[]) => {
-    setChallans(updated);
-    modulesService.saveChallans(updated);
-  };
+    void loadData();
+  }, [isClient, user, showToast]);
 
   const handleProjectSelect = async (projectName: string) => {
     const project = projects.find(p => p.name === projectName);
@@ -92,22 +79,20 @@ export default function ChallansPage() {
       const boqRes = await projectsService.listBoqItems(project.id);
       const items = boqRes.items;
       
-      // Calculate already delivered for each item from existing challans
+      // Use live delivered quantity from database
       const processedItems = items.map(boq => {
-        const delivered = challans
-          .filter(c => c.project_name === projectName)
-          .reduce((acc, c) => acc + (c.items.find(i => i.name === boq.item_name)?.quantity || 0), 0);
-        
-        // Robust matching including trim
         return {
           ...boq,
           name: boq.item_name,
-          delivered,
-          balance: boq.quantity - delivered,
+          delivered: boq.delivered || 0,
+          balance: Math.max(0, boq.quantity - (boq.delivered || 0)),
           dispatchQty: 0
         };
       });
       setDispatchItems(processedItems);
+    } catch (error) {
+      console.error('Error loading BOQ items:', error);
+      showToast('Failed to load project items', 'error');
     } finally {
       setLoadingBoq(false);
     }
@@ -118,7 +103,7 @@ export default function ChallansPage() {
     const item = dispatchItems[index];
     
     if (qty > item.balance) {
-      showToast(`Cannot exceed BOQ balance of ${item.balance}`, 'error');
+      showToast(`Cannot exceed balance of ${item.balance} ${item.unit}`, 'error');
       return;
     }
 
@@ -128,141 +113,147 @@ export default function ChallansPage() {
   };
 
   const createChallan = async () => {
-    const itemsToDispatch = dispatchItems
-      .filter(i => i.dispatchQty > 0)
-      .map(i => ({
-        id: i.id,
-        name: i.name,
-        quantity: i.dispatchQty,
-        unit: i.unit
-      }));
-
-    if (itemsToDispatch.length === 0) {
-      showToast('Select at least one item to dispatch', 'error');
-      return;
-    }
-
-    if (!newChallan.project_name) {
-      showToast('Please select a project', 'error');
-      return;
-    }
-
-    const challan: Challan = {
-      id: Math.random().toString(36).substr(2, 9),
-      challan_no: `CH-${new Date().getFullYear()}-${Math.floor(100 + Math.random() * 900)}`,
-      dispatch_date: new Date().toISOString().split('T')[0],
-      po_no: newChallan.po_no || 'N/A',
-      project_name: newChallan.project_name || '',
-      vendor_name: newChallan.vendor_name || 'Project Site',
-      status: 'ISSUED',
-      items: itemsToDispatch
-    };
-
-    saveChallans([challan, ...challans]);
-    setCreateOpen(false);
     try {
-      const currentUser = await modulesService.getCurrentUser();
-      await modulesService.addAudit({
-        action: 'CHALLAN_CREATED',
-        entity_type: 'challan',
-        entity_id: challan.id,
-        entity_name: challan.challan_no,
-        reason: `New dispatch for project: ${challan.project_name}`,
-        performed_by: currentUser?.email || 'Unknown',
-        details: `${challan.items.length} items | Vendor: ${challan.vendor_name}`,
-        new_values: {
-          project_name: challan.project_name,
-          vendor_name: challan.vendor_name,
-          items_count: challan.items.length,
-          status: challan.status
-        }
-      });
-    } catch (error) {
-      console.error('Failed to add challan audit:', error);
+      if (!user?.id) {
+        showToast('User not authenticated', 'error');
+        return;
+      }
+
+      const itemsToDispatch = dispatchItems
+        .filter(i => i.dispatchQty > 0)
+        .map(i => ({
+          name: i.name,
+          quantity: i.dispatchQty,
+          unit: i.unit
+        }));
+
+      if (itemsToDispatch.length === 0) {
+        showToast('Select at least one item to dispatch', 'info');
+        return;
+      }
+
+      if (!newChallan.project_name?.trim()) {
+        showToast('Please select a project', 'error');
+        return;
+      }
+
+      setIsSaving(true);
+
+      // Generate challan number
+      const challanNo = generateChallanNumber(challans.length);
+
+      // Resolve IDs for the service
+      const project = projects.find(p => p.name === newChallan.project_name);
+      
+      // Create challan in database
+      const result = await modulesService.createChallan(
+        challanNo,
+        newChallan.po_no || '',
+        newChallan.project_name,
+        newChallan.vendor_name || 'Project Site',
+        new Date().toISOString().split('T')[0],
+        itemsToDispatch,
+        user.id,
+        project?.id
+      );
+
+      // Fetch updated challans
+      const updated = await modulesService.getChallans();
+      setChallans(updated);
+
+      setCreateOpen(false);
+      setNewChallan({ status: 'ISSUED', items: [] });
+      setDispatchItems([]);
+      showToast(`Challan ${result.challan_no} created successfully!`, 'success');
+    } catch (error: any) {
+      console.error('Error creating challan:', error);
+      showToast(error?.message || 'Failed to create challan', 'error');
+    } finally {
+      setIsSaving(false);
     }
-    showToast('Delivery Challan Created!', 'success');
   };
 
-  const deleteChallan = async (id: string) => {
-    const existing = challans.find(c => c.id === id);
-    if (!existing) return;
-
-    const confirmation = await confirmAction({
-      title: 'Delete Delivery Challan?',
-      message: `Are you sure you want to delete ${existing.challan_no}? This will permanently remove the record.`,
-      confirmText: 'Delete Challan',
-      requireReason: true,
-      reasonLabel: 'Reason for deletion',
-      reasonPlaceholder: 'Why are you deleting this dispatch record?'
-    });
-
-    if (!confirmation.confirmed) return;
-
-    saveChallans(challans.filter(c => c.id !== id));
-    
+  const deleteChallan = async (id: string, challanNo: string) => {
     try {
-      const currentUser = await modulesService.getCurrentUser();
-      await modulesService.addAudit({
-        action: 'CHALLAN_DELETED',
-        entity_type: 'challan',
-        entity_id: existing.id,
-        entity_name: existing.challan_no,
-        reason: confirmation.reason,
-        performed_by: currentUser?.email || 'Unknown',
-        details: `Deleted challan for ${existing.project_name}. Vendor: ${existing.vendor_name}`,
-        old_values: {
-          challan_no: existing.challan_no,
-          project_name: existing.project_name,
-          status: existing.status
-        }
+      if (!user?.id) {
+        showToast('User not authenticated', 'error');
+        return;
+      }
+
+      const confirmation = await confirmAction({
+        title: 'Delete Delivery Challan?',
+        message: `Are you sure you want to delete ${challanNo}? This will permanently remove the record.`,
+        confirmText: 'Delete Challan',
+        requireReason: true,
+        reasonLabel: 'Reason for deletion',
+        reasonPlaceholder: 'Why are you deleting this dispatch record?'
       });
-    } catch (error) {
-      console.error('Failed to add challan deletion audit:', error);
+
+      if (!confirmation.confirmed) return;
+
+      setIsSaving(true);
+      await modulesService.deleteChallan(id, user.id);
+
+      // Fetch updated challans
+      const updated = await modulesService.getChallans();
+      setChallans(updated);
+
+      showToast('Challan deleted successfully', 'success');
+    } catch (error: any) {
+      console.error('Error deleting challan:', error);
+      showToast(error?.message || 'Failed to delete challan', 'error');
+    } finally {
+      setIsSaving(false);
     }
-    showToast('Challan deleted', 'info');
   };
 
-  const updateStatus = async (id: string, status: Challan['status']) => {
-    const existing = challans.find(c => c.id === id);
-    if (!existing || existing.status === status) return;
-
-    const confirmation = await confirmAction({
-      title: `Update Status to ${status}?`,
-      message: `Change status of ${existing.challan_no} from ${existing.status} to ${status}?`,
-      confirmText: 'Update Status',
-      requireReason: true,
-      reasonLabel: 'Status update reason',
-      reasonPlaceholder: 'Please provide a reason for this status change...'
-    });
-
-    if (!confirmation.confirmed) return;
-
-    if (status === 'DISPATCHED') {
-      showToast('Gate Pass Generated successfully', 'success');
-    }
-    
-    const updated = challans.map(c => c.id === id ? { ...c, status } : c);
-    saveChallans(updated);
-    
+  const updateStatus = async (id: string, status: Challan['status'], challanNo: string) => {
     try {
-      const currentUser = await modulesService.getCurrentUser();
-      await modulesService.addAudit({
-        action: 'CHALLAN_STATUS_UPDATED',
-        entity_type: 'challan',
-        entity_id: existing.id,
-        entity_name: existing.challan_no,
-        reason: confirmation.reason,
-        performed_by: currentUser?.email || 'Unknown',
-        details: `Status changed to ${status}`,
-        old_values: { status: existing.status },
-        new_values: { status }
-      });
-    } catch (error) {
-      console.error('Failed to add challan status audit:', error);
-    }
+      if (!user?.id) {
+        showToast('User not authenticated', 'error');
+        return;
+      }
 
-    if (viewingChallan?.id === id) {
-      setViewingChallan({ ...viewingChallan, status });
+      const existing = challans.find(c => c.id === id);
+      if (!existing || existing.status === status) return;
+
+      const statusLabels: Record<string, string> = {
+        'ISSUED': 'Issued',
+        'DISPATCHED': 'Dispatched / Gate Pass Generated',
+        'DELIVERED': 'Delivered at Site'
+      };
+
+      const confirmation = await confirmAction({
+        title: `Update Status to ${statusLabels[status]}?`,
+        message: `Mark ${challanNo} as ${statusLabels[status].toLowerCase()}?`,
+        confirmText: 'Update Status',
+        requireReason: false
+      });
+
+      if (!confirmation.confirmed) return;
+
+      setIsSaving(true);
+      await modulesService.updateChallanStatus(id, status, user.id);
+
+      // Fetch updated challans
+      const updated = await modulesService.getChallans();
+      setChallans(updated);
+
+      // Update viewed challan if it's the one being updated
+      if (viewingChallan?.id === id) {
+        setViewingChallan({ ...viewingChallan, status });
+      }
+
+      if (status === 'DISPATCHED') {
+        showToast('Gate Pass generated successfully', 'success');
+      } else if (status === 'DELIVERED') {
+        showToast('Marked as delivered', 'success');
+      }
+    } catch (error: any) {
+      console.error('Error updating status:', error);
+      showToast(error?.message || 'Failed to update status', 'error');
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -279,14 +270,27 @@ export default function ChallansPage() {
 
   const paginatedChallans = filteredChallans.slice((page - 1) * pageSize, page * pageSize);
 
+  if (!isClient || !user) {
+    return (
+      <div className={styles.container} style={{ padding: '2rem', textAlign: 'center' }}>
+        <AlertCircle size={48} style={{ margin: '0 auto', color: 'var(--text-muted)' }} />
+        <p style={{ color: 'var(--text-muted)', marginTop: '1rem' }}>Loading authentication...</p>
+      </div>
+    );
+  }
+
   return (
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Challans & Dispatch</h1>
-          <p className={styles.subtitle}>Manage material dispatches and delivery tracking</p>
+          <h1 className={styles.title}>Dispatch Challans</h1>
+          <p className={styles.subtitle}>Manage material dispatches, track delivery status, and print challan records.</p>
         </div>
-        <button className={styles.primaryAction} onClick={() => setCreateOpen(true)}>
+        <button 
+          className={styles.primaryAction} 
+          onClick={() => setCreateOpen(true)}
+          disabled={isLoading || isSaving}
+        >
           <Truck size={18} />
           <span>New Dispatch</span>
         </button>
@@ -296,19 +300,19 @@ export default function ChallansPage() {
         <div className={styles.statCard}>
           <div className={styles.statLabel}>Active Shipments</div>
           <div className={styles.statValue} style={{ color: 'var(--accent-amber)' }}>
-            {challans.filter(c => c.status === 'DISPATCHED').length}
+            {isLoading ? '--' : challans.filter(c => c.status === 'DISPATCHED').length}
           </div>
         </div>
         <div className={styles.statCard}>
           <div className={styles.statLabel}>Total Delivered</div>
           <div className={styles.statValue} style={{ color: 'var(--accent-green)' }}>
-            {challans.filter(c => c.status === 'DELIVERED').length}
+            {isLoading ? '--' : challans.filter(c => c.status === 'DELIVERED').length}
           </div>
         </div>
         <div className={styles.statCard}>
-          <div className={styles.statLabel}>Pending Dispatches</div>
+          <div className={styles.statLabel}>Pending Dispatch</div>
           <div className={styles.statValue} style={{ color: 'var(--text-muted)' }}>
-            {challans.filter(c => c.status === 'ISSUED').length}
+            {isLoading ? '--' : challans.filter(c => c.status === 'ISSUED').length}
           </div>
         </div>
       </div>
@@ -323,123 +327,158 @@ export default function ChallansPage() {
               className={styles.searchInput}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
+              disabled={isLoading}
             />
           </div>
           <div className={styles.filters}>
             <select 
               className={styles.select}
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
+              disabled={isLoading}
             >
               <option value="ALL">All Status</option>
               <option value="ISSUED">Issued</option>
               <option value="DISPATCHED">Dispatched</option>
               <option value="DELIVERED">Delivered</option>
             </select>
-            <button className={styles.actionBtn}>
+            <button className={styles.actionBtn} disabled={isLoading}>
               <Filter size={18} />
             </button>
           </div>
         </div>
 
-        <table className={styles.table}>
-          <thead>
-            <tr>
-              <th style={{ width: '40px' }}>#</th>
-              <th>Challan No</th>
-              <th>Project & PO</th>
-              <th>Dispatch Date</th>
-              <th>Status</th>
-              <th style={{ textAlign: 'right' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {paginatedChallans.length === 0 ? (
-              <tr>
-                <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
-                  No dispatch records found.
-                </td>
-              </tr>
-            ) : (
-              paginatedChallans.map((challan, index) => (
-                <tr key={challan.id}>
-                  <td style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{(page - 1) * pageSize + index + 1}</td>
-                  <td>
-                    <div style={{ fontWeight: 800 }}>{challan.challan_no}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{challan.vendor_name}</div>
-                  </td>
-                  <td>
-                    <div style={{ fontWeight: 600 }}>{challan.project_name}</div>
-                    <div style={{ fontSize: '0.75rem', color: 'var(--accent-blue)' }}>{challan.po_no}</div>
-                  </td>
-                  <td>{challan.dispatch_date}</td>
-                  <td>
-                    <span className={`${styles.statusBadge} ${
-                      challan.status === 'DELIVERED' ? styles.statusDelivered : 
-                      challan.status === 'DISPATCHED' ? styles.statusTransit : styles.statusPending
-                    }`}>
-                      {challan.status === 'DELIVERED' ? <CheckCircle2 size={12} /> : 
-                       challan.status === 'DISPATCHED' ? <Truck size={12} /> : <Clock size={12} />}
-                      {challan.status}
-                    </span>
-                  </td>
-                  <td>
-                    <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'flex-end' }}>
-                      {challan.status === 'ISSUED' && (
-                        <button 
-                          className={styles.primaryAction} 
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.65rem', whiteSpace: 'nowrap' }}
-                          onClick={() => updateStatus(challan.id, 'DISPATCHED')}
-                        >
-                          <Truck size={12} /> Gate Pass
-                        </button>
-                      )}
-                      {challan.status === 'DISPATCHED' && (
-                        <button 
-                          className={styles.primaryAction} 
-                          style={{ padding: '0.25rem 0.5rem', fontSize: '0.65rem', whiteSpace: 'nowrap', background: 'var(--accent-green)' }}
-                          onClick={() => updateStatus(challan.id, 'DELIVERED')}
-                        >
-                          <CheckCircle2 size={12} /> Mark Delivered
-                        </button>
-                      )}
-                      
-                      <button className={styles.actionBtn} title="View Details" onClick={() => setViewingChallan(challan)}>
-                        <Eye size={16} />
-                      </button>
-                      
-                      <button className={styles.actionBtn} title="Download / Print" onClick={() => {
-                        setViewingChallan(challan);
-                        setTimeout(() => window.print(), 100);
-                      }}>
-                        <Printer size={16} />
-                      </button>
-                      
-                        <button 
-                          className={styles.actionBtn} 
-                          style={{ color: 'var(--text-secondary)' }} 
-                          title="Delete"
-                          onClick={() => deleteChallan(challan.id)}
-                        >
-                          <Trash2 size={14} />
-                        </button>
-                    </div>
-                  </td>
+        {isLoading ? (
+          <div style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+            <Clock size={32} style={{ margin: '0 auto', display: 'block', marginBottom: '1rem' }} />
+            Loading challans...
+          </div>
+        ) : (
+          <>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th style={{ width: '40px' }}>#</th>
+                  <th>Challan No</th>
+                  <th>Project & PO</th>
+                  <th>Dispatch Date</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: 'right' }}>Actions</th>
                 </tr>
-              ))
-            )}
-          </tbody>
-        </table>
+              </thead>
+              <tbody>
+                {paginatedChallans.length === 0 ? (
+                  <tr>
+                    <td colSpan={6} style={{ textAlign: 'center', padding: '3rem', color: 'var(--text-muted)' }}>
+                      {search || statusFilter !== 'ALL'
+                        ? 'No challans match the current search or status filter.'
+                        : 'No dispatch records yet. Click "New Dispatch" to create your first challan.'}
+                    </td>
+                  </tr>
+                ) : (
+                  paginatedChallans.map((challan, index) => (
+                    <tr key={challan.id}>
+                      <td style={{ color: 'var(--text-muted)', fontSize: '0.75rem' }}>{(page - 1) * pageSize + index + 1}</td>
+                      <td>
+                        <div style={{ fontWeight: 800 }}>{challan.challan_no}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>{challan.vendor_name}</div>
+                      </td>
+                      <td>
+                        <div style={{ fontWeight: 600 }}>{challan.project_name}</div>
+                        <div style={{ fontSize: '0.75rem', color: 'var(--accent-blue)' }}>{challan.po_no || 'N/A'}</div>
+                      </td>
+                      <td>{challan.dispatch_date}</td>
+                      <td>
+                        <span className={`${styles.statusBadge} ${
+                          challan.status === 'DELIVERED' ? styles.statusDelivered : 
+                          challan.status === 'DISPATCHED' ? styles.statusTransit : styles.statusPending
+                        }`}>
+                          {challan.status === 'DELIVERED' ? <CheckCircle2 size={12} /> : 
+                           challan.status === 'DISPATCHED' ? <Truck size={12} /> : <Clock size={12} />}
+                          {challan.status}
+                        </span>
+                      </td>
+                      <td>
+                        <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'flex-end' }}>
+                          {challan.status === 'ISSUED' && (
+                            <button 
+                              className={styles.primaryAction} 
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.65rem', whiteSpace: 'nowrap' }}
+                              onClick={() => updateStatus(challan.id, 'DISPATCHED', challan.challan_no)}
+                              disabled={isSaving}
+                            >
+                              <Truck size={12} /> Gate Pass
+                            </button>
+                          )}
+                          {challan.status === 'DISPATCHED' && (
+                            <button 
+                              className={styles.primaryAction} 
+                              style={{ padding: '0.25rem 0.5rem', fontSize: '0.65rem', whiteSpace: 'nowrap', background: 'var(--accent-green)' }}
+                              onClick={() => updateStatus(challan.id, 'DELIVERED', challan.challan_no)}
+                              disabled={isSaving}
+                            >
+                              <CheckCircle2 size={12} /> Mark Delivered
+                            </button>
+                          )}
+                          
+                          <button 
+                            className={styles.actionBtn} 
+                            title="View Challan" 
+                            aria-label={`View ${challan.challan_no}`}
+                            onClick={() => setViewingChallan(challan)}
+                            disabled={isSaving}
+                          >
+                            <Eye size={16} />
+                            <span>View</span>
+                          </button>
+                          
+                          <button 
+                            className={styles.actionBtn} 
+                            title="Print Challan"
+                            aria-label={`Print ${challan.challan_no}`}
+                            onClick={() => {
+                              setViewingChallan(challan);
+                              setTimeout(() => window.print(), 100);
+                            }}
+                            disabled={isSaving}
+                          >
+                            <Printer size={16} />
+                            <span>Print</span>
+                          </button>
+                          
+                          <button 
+                            className={styles.actionBtn} 
+                            style={{ color: 'var(--text-secondary)' }} 
+                            title="Delete Challan"
+                            aria-label={`Delete ${challan.challan_no}`}
+                            onClick={() => deleteChallan(challan.id, challan.challan_no)}
+                            disabled={isSaving}
+                          >
+                            <Trash2 size={14} />
+                            <span>Delete</span>
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
 
-        <TablePagination 
-          page={page}
-          pageSize={pageSize}
-          totalItems={filteredChallans.length}
-          onPageChange={setPage}
-          onPageSizeChange={setPageSize}
-          pageSizeOptions={PAGE_SIZE_OPTIONS}
-          itemLabel="challans"
-        />
+            <TablePagination 
+              page={page}
+              pageSize={pageSize}
+              totalItems={filteredChallans.length}
+              onPageChange={setPage}
+              onPageSizeChange={setPageSize}
+              pageSizeOptions={PAGE_SIZE_OPTIONS}
+              itemLabel="challans"
+            />
+          </>
+        )}
       </div>
 
       {/* Create Challan Modal */}
@@ -448,9 +487,13 @@ export default function ChallansPage() {
           <div className={styles.modalContent} onClick={e => e.stopPropagation()}>
             <div className={styles.modalHeader}>
               <h2 style={{ margin: 0, fontSize: '1.25rem', fontWeight: 800 }}>Create Delivery Challan</h2>
-              <button className={styles.actionBtn} onClick={() => setCreateOpen(false)}>✕</button>
+              <button className={styles.actionBtn} onClick={() => setCreateOpen(false)}>Close</button>
             </div>
             <div className={styles.modalBody}>
+              <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '1rem', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                <span>Step 1</span>
+                <span>Select project</span>
+              </div>
               <div className={styles.fieldGroup} style={{ marginBottom: '1.5rem' }}>
                 <label className={styles.fieldLabel}>Select Project *</label>
                 <select 
@@ -467,6 +510,10 @@ export default function ChallansPage() {
 
               {dispatchItems.length > 0 && (
                 <div className={styles.itemSelection} style={{ border: 'none' }}>
+                  <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.75rem', fontSize: '0.78rem', fontWeight: 700, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
+                    <span>Step 2</span>
+                    <span>Choose dispatch quantities</span>
+                  </div>
                   <div className={styles.fieldLabel} style={{ marginBottom: '0.5rem' }}>Dispatch Items</div>
                   <div className={styles.itemHeader} style={{ gridTemplateColumns: '40px 2fr 80px 80px 80px 100px' }}>
                     <span>#</span>
@@ -515,13 +562,26 @@ export default function ChallansPage() {
               )}
             </div>
             <div className={styles.modalFooter}>
-              <button className={styles.actionBtn} onClick={() => setCreateOpen(false)}>Cancel</button>
-              <button className={styles.primaryAction} onClick={createChallan}>
-                Generate Challan & Dispatch
+              <div style={{ marginRight: 'auto', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
+                Step 3: Review the quantities, then generate the challan.
+              </div>
+              <button 
+                className={styles.actionBtn} 
+                onClick={() => setCreateOpen(false)}
+                disabled={isSaving}
+              >
+                Cancel
+              </button>
+              <button 
+                className={styles.primaryAction} 
+                onClick={createChallan}
+                disabled={isSaving || loadingBoq || dispatchItems.length === 0}
+              >
+                {isSaving ? 'Creating...' : 'Generate Challan & Dispatch'}
               </button>
             </div>
+            </div>
           </div>
-        </div>
       )}
 
       {/* View Challan Modal */}
@@ -533,7 +593,7 @@ export default function ChallansPage() {
                 <h2 style={{ margin: 0 }}>{viewingChallan.challan_no}</h2>
                 <p style={{ margin: 0, color: 'var(--text-muted)', fontSize: '0.875rem' }}>{viewingChallan.dispatch_date}</p>
               </div>
-              <button className={styles.actionBtn} onClick={() => setViewingChallan(null)}>✕</button>
+              <button className={styles.actionBtn} onClick={() => setViewingChallan(null)}>Close</button>
             </div>
             <div className={styles.modalBody}>
               <div style={{ marginBottom: '1.5rem', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1rem' }}>
@@ -560,7 +620,7 @@ export default function ChallansPage() {
                   </div>
                 ))}
               </div>
-              
+
               <div style={{ marginTop: '2rem' }}>
                 <div className={styles.fieldLabel}>Update Status</div>
                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
@@ -572,9 +632,12 @@ export default function ChallansPage() {
                         flex: 1, 
                         background: viewingChallan.status === s ? 'var(--accent-blue)' : '#f1f5f9',
                         color: viewingChallan.status === s ? 'white' : '#475569',
-                        fontSize: '0.65rem'
+                        fontSize: '0.65rem',
+                        cursor: viewingChallan.status === s || isSaving ? 'not-allowed' : 'pointer',
+                        opacity: viewingChallan.status === s || isSaving ? 0.6 : 1
                       }}
-                      onClick={() => updateStatus(viewingChallan.id, s)}
+                      onClick={() => updateStatus(viewingChallan.id, s, viewingChallan.challan_no)}
+                      disabled={viewingChallan.status === s || isSaving}
                     >
                       {s}
                     </button>
@@ -583,6 +646,9 @@ export default function ChallansPage() {
               </div>
             </div>
             <div className={styles.modalFooter}>
+              <button className={styles.actionBtn} onClick={() => setViewingChallan(null)} disabled={isSaving}>
+                Close
+              </button>
               <button 
                 className={styles.primaryAction} 
                 onClick={() => {
@@ -591,6 +657,7 @@ export default function ChallansPage() {
                   window.print();
                   document.title = originalTitle;
                 }}
+                disabled={isSaving}
               >
                 <FileText size={16} /> Download PDF / Print
               </button>
@@ -601,3 +668,4 @@ export default function ChallansPage() {
     </div>
   );
 }
+

@@ -105,6 +105,7 @@ async function loadVariantNames(variantIds: string[]) {
 const CHALLANS_KEY = 'ims_challans_v1';
 const DELIVERY_RECEIPTS_KEY = 'ims_delivery_receipts_v1';
 const PAYMENT_SLIPS_KEY = 'ims_payment_slips_v1';
+const BOQ_ITEMS_KEY = 'ims_project_boq_items_v1';
 
 function readLocalData<T>(key: string): T[] {
   if (typeof window === 'undefined') return [];
@@ -172,6 +173,7 @@ const PERMISSIONS: PermissionRow[] = [
   { id: 'p45', key: 'users.edit', label: 'Edit Users', module: 'Users', description: 'Change user role and profile.' },
   { id: 'p46', key: 'users.disable', label: 'Enable or Disable Users', module: 'Users', description: 'Control whether a user can sign in.', admin_only: true },
   { id: 'p47', key: 'roles.manage', label: 'Manage Roles & Permissions', module: 'Users', description: 'Create roles and assign permission sets.', admin_only: true },
+  { id: 'p48', key: 'site_records.view', label: 'View Site Records', module: 'Operations', description: 'Access the unified material delivery and payment record command center.' },
 ];
 
 const ROUTE_PERMISSION_MAP: Array<{ pattern: RegExp; permission: string }> = [
@@ -185,8 +187,7 @@ const ROUTE_PERMISSION_MAP: Array<{ pattern: RegExp; permission: string }> = [
   { pattern: /^\/orders$/, permission: 'orders.view' },
   { pattern: /^\/rate-inquiry$/, permission: 'rate_inquiry.view' },
   { pattern: /^\/challans$/, permission: 'challans.view' },
-  { pattern: /^\/site-records$/, permission: 'deliveries.view' },
-  { pattern: /^\/payments$/, permission: 'payments.view' },
+  { pattern: /^\/site-records$/, permission: 'site_records.view' },
   { pattern: /^\/reports$/, permission: 'reports.view' },
   { pattern: /^\/audit$/, permission: 'audit.view' },
   { pattern: /^\/users$/, permission: 'users.view' },
@@ -194,10 +195,10 @@ const ROUTE_PERMISSION_MAP: Array<{ pattern: RegExp; permission: string }> = [
 
 const FALLBACK_ROLES: RoleRow[] = [
   { id: 'r1', name: 'Super Admin', permission_keys: PERMISSIONS.map(p => p.key) },
-  { id: 'r2', name: 'Admin', permission_keys: PERMISSIONS.filter(p => !p.admin_only).map(p => p.key) },
-  { id: 'r3', name: 'Purchase Manager', permission_keys: ['dashboard.view', 'products.view', 'projects.view', 'vendors.view', 'orders.view'] },
-  { id: 'r4', name: 'Store Manager', permission_keys: ['dashboard.view', 'products.view', 'stock.view', 'inventory.view', 'challans.view'] },
-  { id: 'r5', name: 'Accounts', permission_keys: ['dashboard.view', 'payments.view', 'reports.view'] },
+  { id: 'r2', name: 'Admin', permission_keys: [...PERMISSIONS.filter(p => !p.admin_only).map(p => p.key), 'site_records.view'] },
+  { id: 'r3', name: 'Purchase Manager', permission_keys: ['dashboard.view', 'products.view', 'projects.view', 'vendors.view', 'orders.view', 'site_records.view'] },
+  { id: 'r4', name: 'Store Manager', permission_keys: ['dashboard.view', 'products.view', 'stock.view', 'inventory.view', 'challans.view', 'site_records.view'] },
+  { id: 'r5', name: 'Accounts', permission_keys: ['dashboard.view', 'payments.view', 'reports.view', 'site_records.view'] },
   { id: 'r6', name: 'Viewer', permission_keys: ['dashboard.view', 'products.view', 'projects.view'] },
 ];
 
@@ -251,8 +252,15 @@ export const modulesService = {
           data: RoleRow[] | null;
           error: any;
         };
+
         if (error) {
-          console.warn('Role refresh timed out or failed, falling back to cached/default roles:', error);
+          console.warn('Role refresh failed or timed out:', error);
+          // If we have an error (like 403), don't try to seed, just use fallbacks
+          if (!this._initialized) {
+            this._roles = FALLBACK_ROLES;
+            this._initialized = true;
+          }
+          return;
         }
 
         if (data && data.length > 0) {
@@ -268,14 +276,23 @@ export const modulesService = {
             localStorage.setItem('ims_roles_cache_v1', JSON.stringify(this._roles));
           }
         } else if (!this._initialized) {
-          // Seed initial roles if none exist and not already initialized from cache
+          // Only seed if we definitely got successful empty data
           console.log('Roles table empty, seeding initial roles...');
-          await supabase.from('roles').insert(FALLBACK_ROLES);
-          this._roles = FALLBACK_ROLES;
+          try {
+            await supabase.from('roles').insert(FALLBACK_ROLES);
+            this._roles = FALLBACK_ROLES;
+          } catch (seedError) {
+            console.error('Failed to seed roles:', seedError);
+            this._roles = FALLBACK_ROLES;
+          }
           this._initialized = true;
         }
       } catch (e) {
         console.error('Error refreshing roles:', e);
+        if (!this._initialized) {
+          this._roles = FALLBACK_ROLES;
+          this._initialized = true;
+        }
       } finally {
         this._refreshRolesPromise = null;
       }
@@ -316,7 +333,7 @@ export const modulesService = {
         .eq('id', data.user.id);
 
       // Get user profile - use limit(1) to avoid PGRST116
-      const { data: profiles, error: profileError } = await supabase
+      let { data: profiles, error: profileError } = await supabase
         .from('user_profiles')
         .select(`
           *,
@@ -328,6 +345,19 @@ export const modulesService = {
         `)
         .eq('id', data.user.id)
         .limit(1);
+
+      // If join fails (e.g. 403 on roles table), retry without join
+      if (profileError && (profileError.code === '403' || profileError.status === 403)) {
+        console.warn('[Auth] Role join failed in signIn (403), fetching profile without join');
+        const { data: simpleProfiles, error: simpleError } = await supabase
+          .from('user_profiles')
+          .select('*')
+          .eq('id', data.user.id)
+          .limit(1);
+        
+        profiles = simpleProfiles;
+        profileError = simpleError;
+      }
 
       if (profileError || !profiles || profiles.length === 0) {
         console.error('Profile fetch error:', profileError || 'Profile not found');
@@ -550,7 +580,8 @@ export const modulesService = {
         return null;
       }
 
-        const { data: profiles, error: profileError } = await supabase
+        // Try fetching profile with roles join
+        let { data: profiles, error: profileError } = await supabase
           .from('user_profiles')
           .select(`
             *,
@@ -562,6 +593,19 @@ export const modulesService = {
           `)
           .eq('id', user.id)
           .limit(1);
+
+        // If join fails (e.g. 403 on roles table), retry without join
+        if (profileError && (profileError.code === '403' || profileError.status === 403)) {
+          console.warn('[Auth] Role join failed (403), fetching profile without join');
+          const { data: simpleProfiles, error: simpleError } = await supabase
+            .from('user_profiles')
+            .select('*')
+            .eq('id', user.id)
+            .limit(1);
+          
+          profiles = simpleProfiles;
+          profileError = simpleError;
+        }
 
         if (profileError || !profiles || profiles.length === 0) {
           if (profileError) console.error('Profile fetch error:', profileError);
@@ -1214,25 +1258,323 @@ export const modulesService = {
 
   async getChallans(): Promise<ChallanRow[]> {
     try {
-      const { data, error } = await supabase
+      const { data: challans, error: chError } = await supabase
         .from('challans')
         .select('*')
         .order('dispatch_date', { ascending: false });
 
-      if (error) {
-        if (isSchemaError(error)) return readLocalData<ChallanRow>(CHALLANS_KEY);
-        console.error('Error fetching challans:', error);
+      if (chError) {
+        if (isSchemaError(chError)) return readLocalData<ChallanRow>(CHALLANS_KEY);
+        console.error('Error fetching challans:', chError);
         return readLocalData<ChallanRow>(CHALLANS_KEY);
       }
 
-      return (data as ChallanRow[]) || [];
+      if (!challans || challans.length === 0) return [];
+
+      // Fetch items for all challans
+      const { data: items, error: itemsError } = await supabase
+        .from('challan_items')
+        .select('*');
+
+      if (itemsError) {
+        console.error('Error fetching challan items:', itemsError);
+        return challans.map((c: any) => ({
+          id: c.id,
+          challan_no: c.challan_no,
+          po_no: c.po_no || '',
+          project_name: c.project_name || '',
+          vendor_name: c.vendor_name || '',
+          dispatch_date: c.dispatch_date || '',
+          status: c.status || 'ISSUED',
+          items: []
+        }));
+      }
+
+      // Group items by challan_id
+      const itemsByChallans = new Map<string, any[]>();
+      (items || []).forEach(item => {
+        if (!itemsByChallans.has(item.challan_id)) {
+          itemsByChallans.set(item.challan_id, []);
+        }
+        itemsByChallans.get(item.challan_id)!.push({
+          id: item.id,
+          variant_id: item.variant_id,
+          name: item.name || `Item ${item.id}`,
+          quantity: item.quantity || 0,
+          unit: item.unit || 'Nos'
+        });
+      });
+
+      return challans.map((c: any) => ({
+        id: c.id,
+        challan_no: c.challan_no,
+        po_no: c.po_no || '',
+        project_name: c.project_name || '',
+        vendor_name: c.vendor_name || '',
+        dispatch_date: c.dispatch_date || '',
+        status: c.status || 'ISSUED',
+        items: itemsByChallans.get(c.id) || []
+      }));
     } catch (error) {
       console.error('Error fetching challans:', error);
       return readLocalData<ChallanRow>(CHALLANS_KEY);
     }
   },
 
+  async createChallan(
+    challanNo: string,
+    poNo: string,
+    projectName: string,
+    vendorName: string,
+    dispatchDate: string,
+    items: Array<{ name: string; quantity: number; unit: string; variant_id?: string }>,
+    userId: string,
+    projectId?: string,
+    vendorId?: string
+  ): Promise<{ id: string; challan_no: string }> {
+    try {
+      // Validate inputs
+      if (!challanNo?.trim()) throw new Error('Challan number is required');
+      if (!projectName?.trim()) throw new Error('Project name is required');
+      if (!dispatchDate?.trim()) throw new Error('Dispatch date is required');
+      if (!items || items.length === 0) throw new Error('At least one item is required');
+      if (!userId?.trim()) throw new Error('User ID is required');
+
+      // Generate UUID for challan
+      const challanId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9);
+
+      // Use provided IDs or resolve them
+      const finalProjectId = projectId || await findProjectIdByName(projectName);
+      const finalVendorId = vendorId || (vendorName ? await ensureVendor(vendorName) : null);
+
+      // Insert challan
+      const challanToInsert: any = {
+        id: challanId,
+        challan_no: challanNo.trim(),
+        po_no: poNo?.trim() || null,
+        project_name: projectName.trim(),
+        vendor_name: vendorName?.trim() || 'Project Site',
+        dispatch_date: dispatchDate,
+        status: 'ISSUED',
+        created_by: userId
+      };
+
+      if (finalProjectId) challanToInsert.project_id = finalProjectId;
+      if (finalVendorId) challanToInsert.vendor_id = finalVendorId;
+
+      const { error: challanError } = await supabase.from('challans').insert(challanToInsert);
+      if (challanError) throw challanError;
+
+      // Insert items
+      const itemsToInsert = items.map(item => ({
+        challan_id: challanId,
+        name: item.name.trim(),
+        quantity: Number(item.quantity),
+        unit: item.unit.trim(),
+        variant_id: item.variant_id || null
+      }));
+
+      const { error: itemsError } = await supabase.from('challan_items').insert(itemsToInsert);
+      if (itemsError) {
+        await supabase.from('challans').delete().eq('id', challanId);
+        throw itemsError;
+      }
+
+      // Update BOQ delivered quantities (Live Sync)
+      if (finalProjectId) {
+        try {
+          for (const item of items) {
+            // Find in boq_items by project_id and item_name
+            const { data: boqItem, error: fetchError } = await supabase
+              .from('boq_items')
+              .select('id, delivered')
+              .eq('project_id', finalProjectId)
+              .ilike('item_name', item.name.trim())
+              .limit(1)
+              .single();
+
+            if (!fetchError && boqItem) {
+              const newDelivered = (Number(boqItem.delivered) || 0) + Number(item.quantity);
+              await supabase
+                .from('boq_items')
+                .update({ delivered: newDelivered })
+                .eq('id', boqItem.id);
+              
+              console.log(`[BOQ-SYNC] Updated BOQ item ${item.name}: +${item.quantity}`);
+            }
+          }
+          
+          // Local Storage Sync
+          if (typeof window !== 'undefined') {
+            const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
+            if (raw) {
+              const state = JSON.parse(raw);
+              if (state[finalProjectId]) {
+                state[finalProjectId] = state[finalProjectId].map((boq: any) => {
+                  const match = items.find(i => i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase());
+                  if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };
+                  return boq;
+                });
+                window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn('[BOQ-SYNC] Sync warning:', e);
+        }
+      }
+
+      // Save to local storage as backup
+      const challanRow: ChallanRow = {
+        id: challanId,
+        challan_no: challanNo.trim(),
+        po_no: poNo?.trim() || '',
+        project_name: projectName.trim(),
+        vendor_name: vendorName?.trim() || 'Project Site',
+        dispatch_date: dispatchDate,
+        status: 'ISSUED',
+        items: items.map((item, idx) => ({
+          id: `${challanId}-${idx}`,
+          name: item.name.trim(),
+          quantity: Number(item.quantity),
+          unit: item.unit.trim()
+        }))
+      };
+
+      const existing = readLocalData<ChallanRow>(CHALLANS_KEY);
+      writeLocalData<ChallanRow>(CHALLANS_KEY, [challanRow, ...existing]);
+
+      return { id: challanId, challan_no: challanNo.trim() };
+    } catch (error) {
+      console.error('Error creating challan:', error);
+      throw error;
+    }
+  },
+
+  async updateChallanStatus(challanId: string, newStatus: 'ISSUED' | 'DISPATCHED' | 'DELIVERED', userId: string): Promise<void> {
+    try {
+      if (!challanId?.trim()) throw new Error('Challan ID is required');
+      if (!['ISSUED', 'DISPATCHED', 'DELIVERED'].includes(newStatus)) {
+        throw new Error(`Invalid status: ${newStatus}`);
+      }
+      if (!userId?.trim()) throw new Error('User ID is required');
+
+      // Get current challan to validate transition
+      const { data: current, error: fetchError } = await supabase
+        .from('challans')
+        .select('status')
+        .eq('id', challanId)
+        .single();
+
+      if (fetchError || !current) throw new Error('Challan not found');
+
+      // Validate status transition
+      const validTransitions: Record<string, string[]> = {
+        'ISSUED': ['DISPATCHED', 'CANCELLED'],
+        'DISPATCHED': ['DELIVERED'],
+        'DELIVERED': [] // Final state
+      };
+
+      if (!validTransitions[current.status]?.includes(newStatus)) {
+        throw new Error(`Cannot change status from ${current.status} to ${newStatus}`);
+      }
+
+      const { error: updateError } = await supabase
+        .from('challans')
+        .update({ status: newStatus })
+        .eq('id', challanId);
+
+      if (updateError) throw updateError;
+
+      // Update local cache
+      const existing = readLocalData<ChallanRow>(CHALLANS_KEY);
+      const updated = existing.map(c => c.id === challanId ? { ...c, status: newStatus as 'ISSUED' | 'DISPATCHED' | 'DELIVERED' } : c);
+      writeLocalData<ChallanRow>(CHALLANS_KEY, updated);
+    } catch (error) {
+      console.error('Error updating challan status:', error);
+      throw error;
+    }
+  },
+
+  async deleteChallan(challanId: string, userId: string): Promise<void> {
+    try {
+      if (!challanId?.trim()) throw new Error('Challan ID is required');
+      if (!userId?.trim()) throw new Error('User ID is required');
+
+      // 1. Get challan details and items before deletion to revert BOQ
+      const { data: challan, error: fetchError } = await supabase
+        .from('challans')
+        .select('project_id, status')
+        .eq('id', challanId)
+        .single();
+
+      if (fetchError || !challan) throw new Error('Challan not found');
+
+      const { data: items, error: itemsError } = await supabase
+        .from('challan_items')
+        .select('name, quantity')
+        .eq('challan_id', challanId);
+
+      // 2. Revert BOQ delivered quantities (Live Sync Reversal)
+      if (challan.project_id && items && items.length > 0) {
+        try {
+          for (const item of items) {
+            const { data: boqItem, error: boqError } = await supabase
+              .from('boq_items')
+              .select('id, delivered')
+              .eq('project_id', challan.project_id)
+              .ilike('item_name', item.name.trim())
+              .limit(1)
+              .single();
+
+            if (!boqError && boqItem) {
+              const newDelivered = Math.max(0, (Number(boqItem.delivered) || 0) - Number(item.quantity));
+              await supabase
+                .from('boq_items')
+                .update({ delivered: newDelivered })
+                .eq('id', boqItem.id);
+            }
+          }
+
+          // Local Storage BOQ Sync Reversal
+          if (typeof window !== 'undefined') {
+            const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
+            if (raw) {
+              const state = JSON.parse(raw);
+              if (state[challan.project_id]) {
+                state[challan.project_id] = state[challan.project_id].map((boq: any) => {
+                  const match = items.find(i => i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase());
+                  if (match) return { ...boq, delivered: Math.max(0, (Number(boq.delivered) || 0) - Number(match.quantity)) };
+                  return boq;
+                });
+                window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
+              }
+            }
+          }
+        } catch (revertError) {
+          console.warn('[BOQ-REVERT] Warning during quantity reversal:', revertError);
+        }
+      }
+
+      // 3. Delete challan (items will cascade delete in DB)
+      const { error: deleteError } = await supabase
+        .from('challans')
+        .delete()
+        .eq('id', challanId);
+
+      if (deleteError) throw deleteError;
+
+      // 4. Update local challan cache
+      const existing = readLocalData<ChallanRow>(CHALLANS_KEY);
+      writeLocalData<ChallanRow>(CHALLANS_KEY, existing.filter(c => c.id !== challanId));
+    } catch (error) {
+      console.error('Error deleting challan:', error);
+      throw error;
+    }
+  },
+
   async saveChallans(challans: ChallanRow[]): Promise<void> {
+    // Keep for backward compatibility but use DB when possible
     writeLocalData<ChallanRow>(CHALLANS_KEY, challans);
   },
 
