@@ -90,8 +90,8 @@ export default function ProjectBoqPage() {
       setUnits(unitList.length ? unitList : [DEFAULT_UNIT]);
       setWarehouses(warehouseList);
 
-      const nameToMeta = new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string }>();
-      const meta: Record<string, { name: string; manufacturer: string; unit: string; label: string; stock: number }> = {};
+      const nameToMeta = new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string; stock_data?: any[] }>();
+      const meta: Record<string, { name: string; manufacturer: string; unit: string; label: string; stock: number; stock_data?: any[] }> = {};
       const options: Array<{ value: string; label: string; keywords?: string[] }> = [];
 
       (products || []).forEach((product: any) => {
