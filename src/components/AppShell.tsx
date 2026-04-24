@@ -17,7 +17,8 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const { user, isLoading, isClient } = useAuth();
-  const [canAccessRoute, setCanAccessRoute] = React.useState(false);
+  const [canAccessRoute, setCanAccessRoute] = React.useState(true); // Default to true (fail open)
+  const [lastCheckedRoute, setLastCheckedRoute] = React.useState<string>('');
 
   const isLoginRoute = pathname === '/login';
 
@@ -28,39 +29,49 @@ export default function AppShell({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  // Check route access when user or pathname changes
+  // Check route access - but only if route changed and user is ready
   React.useEffect(() => {
+    // Skip checks on login route or during loading
+    if (isLoginRoute || !isClient || !user || lastCheckedRoute === pathname) {
+      return;
+    }
+
     let mounted = true;
-    const checkRouteAccess = async () => {
-      if (!isClient) return;
+    let timeoutId: NodeJS.Timeout;
 
-      console.log('[AppShell] Checking route access', { user: user?.email, pathname });
+    // Defer the check slightly to not block navigation
+    timeoutId = setTimeout(async () => {
+      if (!mounted) return;
 
-      if (user && !isLoginRoute) {
-        try {
-          const accessPromise = modulesService.canAccessRoute(user, pathname);
-          const timeoutPromise = new Promise<boolean>((resolve) => {
-            setTimeout(() => {
-              resolve(true); // Fail open if the permission check takes too long
-            }, 15000);
-          });
+      try {
+        console.log('[AppShell] Checking route access', { user: user?.email, pathname });
+        
+        const accessPromise = modulesService.canAccessRoute(user, pathname);
+        const timeoutPromise = new Promise<boolean>((resolve) => {
+          setTimeout(() => {
+            resolve(true); // Fail open if check takes too long
+          }, 5000); // Shorter timeout, non-blocking
+        });
 
-          const routeAccess = await Promise.race([accessPromise, timeoutPromise]);
-          if (mounted) {
-            setCanAccessRoute(routeAccess);
-          }
-        } catch (error) {
-          console.error('[AppShell] Error checking route access:', error);
-          if (mounted) setCanAccessRoute(false);
+        const routeAccess = await Promise.race([accessPromise, timeoutPromise]);
+        if (mounted) {
+          setCanAccessRoute(routeAccess);
+          setLastCheckedRoute(pathname);
         }
-      } else {
-        if (mounted) setCanAccessRoute(false);
+      } catch (error) {
+        console.error('[AppShell] Error checking route access:', error);
+        if (mounted) {
+          setCanAccessRoute(true); // Fail open on error
+          setLastCheckedRoute(pathname);
+        }
       }
-    };
+    }, 100); // Small delay to debounce rapid route changes
 
-    checkRouteAccess();
-    return () => { mounted = false; };
-  }, [user, pathname, isClient, isLoginRoute]);
+    return () => {
+      mounted = false;
+      clearTimeout(timeoutId);
+    };
+  }, [pathname, isClient, user, isLoginRoute, lastCheckedRoute]);
 
   // Handle navigation based on auth state
   React.useEffect(() => {

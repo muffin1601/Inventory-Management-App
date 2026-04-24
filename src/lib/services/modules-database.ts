@@ -479,7 +479,8 @@ export const modulesService = {
 
   async getCurrentUser(): Promise<UserAccessRow | null> {
     const now = Date.now();
-    // 1. Memory Cache (Increased to 30s for better stability)
+    
+    // 1. Memory Cache (30s for better stability)
     if (this._currentUserCache && now - this._currentUserCacheAt < 30000) {
       return this._currentUserCache;
     }
@@ -489,29 +490,13 @@ export const modulesService = {
       return this._currentUserPromise;
     }
 
-    // 3. LocalStorage Cache (Prevents redirect flicker on refresh)
+    // 3. LocalStorage Cache (24 hour for UI responsiveness)
     if (typeof window !== 'undefined' && !this._currentUserCache) {
       const saved = localStorage.getItem('ims_user_cache_v1');
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
-          if (parsed && (now - parsed._cachedAt < 3600000)) { // 1 hour cache
-            this._currentUserCache = parsed;
-            this._currentUserCacheAt = parsed._cachedAt;
-          }
-        } catch (e) {
-          localStorage.removeItem('ims_user_cache_v1');
-        }
-      }
-    }
-
-    // 3. LocalStorage Cache (Prevents redirect flicker and timeouts on refresh)
-    if (typeof window !== 'undefined' && !this._currentUserCache) {
-      const saved = localStorage.getItem('ims_user_cache_v1');
-      if (saved) {
-        try {
-          const parsed = JSON.parse(saved);
-          if (parsed && (now - parsed._cachedAt < 86400000)) { // 24 hour cache for UI responsiveness
+          if (parsed && (now - parsed._cachedAt < 86400000)) { // 24 hour cache
             this._currentUserCache = parsed;
             this._currentUserCacheAt = parsed._cachedAt;
             
@@ -520,6 +505,10 @@ export const modulesService = {
                this._currentUserPromise = (async () => {
                  try {
                    const fresh = await this._fetchFreshUser();
+                   if (fresh) {
+                     this._currentUserCache = fresh;
+                     this._currentUserCacheAt = Date.now();
+                   }
                    return fresh;
                  } finally {
                    this._currentUserPromise = null;
@@ -535,6 +524,7 @@ export const modulesService = {
       }
     }
 
+    // Fetch fresh user from API
     this._currentUserPromise = this._fetchFreshUser();
     return this._currentUserPromise;
   },

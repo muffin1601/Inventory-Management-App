@@ -15,61 +15,58 @@ type AuthContextType = {
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [user, setUser] = useState<UserAccessRow | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
-  const [isClient, setIsClient] = useState(false);
-
-  // Initialize auth state on mount
-  useEffect(() => {
-    setIsClient(true);
-    
-    // Quick sync check for cached user to prevent flickering
+  const [user, setUser] = useState<UserAccessRow | null>(() => {
+    // Initialize from cache synchronously to prevent flickering
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('ims_user_cache_v1');
       if (saved) {
         try {
           const parsed = JSON.parse(saved);
           if (parsed && (Date.now() - parsed._cachedAt < 3600000)) {
-            setUser(parsed);
-            setIsLoading(false); // Stop loading early if we have a cache
+            return parsed;
           }
         } catch (e) {}
       }
     }
+    return null;
+  });
+  const [isLoading, setIsLoading] = useState(true);
+  const [isClient, setIsClient] = useState(false);
+  const [initDone, setInitDone] = useState(false);
 
+  // Initialize auth state on mount ONLY
+  useEffect(() => {
+    setIsClient(true);
+    setIsLoading(false); // Cache is already loaded from initializer
+    
     let mounted = true;
     let timeoutId: NodeJS.Timeout;
 
-    const initAuth = async () => {
+    const backgroundRefresh = async () => {
       try {
-        // Set a shorter timeout of 8 seconds
         const timeoutPromise = new Promise<null>((resolve) => {
           timeoutId = setTimeout(() => {
-            console.warn('[AuthContext] Initial auth check timeout - proceeding with null user');
             resolve(null);
-          }, 8000);
+          }, 30000);
         });
 
         const authPromise = modulesService.getCurrentUser();
         const currentUser = await Promise.race([authPromise, timeoutPromise]);
 
-        if (mounted) {
-          setUser(currentUser || null);
+        if (mounted && currentUser) {
+          setUser(currentUser);
         }
       } catch (error) {
-        console.error('[AuthContext] Error initializing auth:', error);
-        if (mounted) {
-          setUser(null);
-        }
+        console.error('[AuthContext] Background refresh error:', error);
       } finally {
         clearTimeout(timeoutId);
-        if (mounted) {
-          setIsLoading(false);
-        }
       }
     };
 
-    initAuth();
+    // Background refresh if cache exists
+    if (user) {
+      backgroundRefresh();
+    }
 
     // Listen for auth state changes from Supabase
     const {
@@ -81,34 +78,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       if (event === 'SIGNED_OUT') {
         setUser(null);
-        setIsLoading(false);
       } else if (event === 'SIGNED_IN' || event === 'TOKEN_REFRESHED') {
-        // If we are already loading, it's fine to proceed if this is a login event
-        // as the fetch might have been triggered by the login action itself
-        
-        try {
-          const timeoutPromise = new Promise<null>((resolve) => {
-            setTimeout(() => {
-              console.warn(`[AuthContext] User fetch timeout after ${event} - using existing state`);
-              resolve(null);
-            }, 10000);
-          });
-
-          const authPromise = modulesService.getCurrentUser();
-          const currentUser = await Promise.race([authPromise, timeoutPromise]);
-          
-          if (mounted && currentUser) {
-            setUser(currentUser);
-            setIsLoading(false); // Ensure loading is cleared if we got a user
-          }
-        } catch (error) {
-          console.error('[AuthContext] Error fetching user after auth change:', error);
-        } finally {
-          if (mounted) {
-            // Only set loading false if we're not waiting for initAuth anymore
-            setIsLoading(false);
-          }
-        }
+        backgroundRefresh();
       }
     });
 
