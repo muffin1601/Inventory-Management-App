@@ -227,10 +227,10 @@ export default function ReportsPage() {
         setOrders(orderRows);
         setMovements(movementRows);
         setAuditTrail(auditRows);
-        setProjects(projectList.projects);
-        setBoqItems(boqList.items);
+        setProjects(projectList);
+        setBoqItems(boqList);
         setVendors(vendorRows);
-        setProjectWarning(projectList.warning || boqList.warning || "");
+        setProjectWarning("");
       } catch (error) {
         console.error("Failed to load report data:", error);
         showToast("Could not load reports right now.", "error");

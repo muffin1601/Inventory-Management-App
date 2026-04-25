@@ -290,7 +290,7 @@ export default function Dashboard() {
           products: productCount,
           variants: allVariants.length,
           vendors: vendors.length || vendorMap.size,
-          projects: projectList.projects.length,
+          projects: projectList.length,
           pendingPos: pendingOrderCount,
           approvedPos: approvedOrderCount,
           challans: challans.length,

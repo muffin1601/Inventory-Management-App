@@ -4,13 +4,11 @@ import React from 'react';
 import styles from './Projects.module.css';
 import Link from 'next/link';
 import { Plus, Search, Building2, Eye, Pencil, Trash2, X } from 'lucide-react';
-import { projectsService, type DataSource, type ProjectRecord } from '@/lib/services/projects';
+import { projectsService, type ProjectRecord } from '@/lib/services/projects';
 import { useUi } from '@/components/ui/AppProviders';
 
 export default function ProjectsPage() {
   const ui = useUi();
-  const [source, setSource] = React.useState<DataSource>('supabase');
-  const [warning, setWarning] = React.useState<string>('');
   const [projects, setProjects] = React.useState<ProjectRecord[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [query, setQuery] = React.useState('');
@@ -32,12 +30,11 @@ export default function ProjectsPage() {
     setIsLoading(true);
     try {
       const result = await projectsService.listProjects();
-      setSource(result.source);
-      setWarning(result.warning || '');
-      setProjects(result.projects);
+      setProjects(result);
     } catch (err) {
       console.error(err);
-      ui.showToast('Unable to load projects right now.', 'error');
+      const errorMsg = err instanceof Error ? err.message : 'Unable to load projects';
+      ui.showToast(errorMsg, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -89,12 +86,11 @@ export default function ProjectsPage() {
         });
         ui.showToast('Project updated.', 'success');
       } else {
-        const created = await projectsService.createProject({
+        await projectsService.createProject({
           name,
           client_name: client,
           delivery_address: address || undefined,
         });
-        setSource(created.source);
         ui.showToast('Project created.', 'success');
       }
 
@@ -161,12 +157,10 @@ export default function ProjectsPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <span className={styles.badge} title={warning || ''}>
-            <Building2 size={14} /> {source === 'local' ? 'Local mode' : 'Live mode'}
+          <span className={styles.badge} title="Live database connection">
+            <Building2 size={14} /> Live Mode
           </span>
         </div>
-
-        {warning ? <div className={styles.empty}>{warning}</div> : null}
 
         {isLoading ? (
           <div className={styles.empty}>Loading projects...</div>

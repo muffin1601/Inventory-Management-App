@@ -222,8 +222,8 @@ function RateInquiryContent() {
     const loadProjects = async () => {
       try {
         const result = await projectsService.listProjects();
-        setProjects(result.projects);
-        const map = new Map(result.projects.map((p) => [p.id, p]));
+        setProjects(result);
+        const map = new Map(result.map((p) => [p.id, p]));
         setProjectsMap(map);
       } catch {
         showToast('Unable to load projects', 'error');
@@ -240,7 +240,7 @@ function RateInquiryContent() {
         const items: BoqItemRecord[] = [];
         for (const projectId of viewingInquiry.project_ids) {
           const result = await projectsService.listBoqItems(projectId);
-          items.push(...result.items);
+          items.push(...result);
         }
         setBoqItems(items);
       } catch {
@@ -277,7 +277,7 @@ function RateInquiryContent() {
       try {
         for (const pid of projectIds) {
           const res = await projectsService.listBoqItems(pid);
-          itemCount += res.items.length;
+          itemCount += res.length;
         }
       } catch (e) {
         console.error("Failed to count items", e);
@@ -1113,4 +1113,3 @@ function RateInquiryContent() {
     </div>
   );
 }
-

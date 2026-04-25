@@ -39,8 +39,6 @@ export default function ChallansPage() {
   const [loadingBoq, setLoadingBoq] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [isSaving, setIsSaving] = useState(false);
-  const [vendors, setVendors] = useState<string[]>([]);
-  const [purchaseOrders, setPurchaseOrders] = useState<string[]>([]);
   const [newChallan, setNewChallan] = useState<Partial<Challan>>({
     status: 'ISSUED',
     items: []
@@ -58,16 +56,9 @@ export default function ChallansPage() {
           modulesService.getChallans()
         ]);
         
-        setProjects(projRes.projects);
+        setProjects(projRes);
         setChallans(challansRes);
         
-        // Extract unique vendors from existing challans
-        const uniqueVendors = [...new Set(challansRes.map(c => c.vendor_name).filter(Boolean))];
-        setVendors(uniqueVendors);
-        
-        // Extract unique POs from existing challans
-        const uniquePOs = [...new Set(challansRes.map(c => c.po_no).filter(Boolean))];
-        setPurchaseOrders(uniquePOs);
       } catch (error) {
         console.error('Error loading data:', error);
         showToast('Failed to load challans', 'error');
@@ -86,11 +77,10 @@ export default function ChallansPage() {
     setNewChallan({ ...newChallan, project_name: projectName, items: [] });
     setLoadingBoq(true);
     try {
-      const boqRes = await projectsService.listBoqItems(project.id);
-      const items = boqRes.items;
+      const items = await projectsService.listBoqItems(project.id);
       
       // Use live delivered quantity from database
-      const processedItems = items.map(boq => {
+      const processedItems = items.map((boq) => {
         return {
           ...boq,
           name: boq.item_name,

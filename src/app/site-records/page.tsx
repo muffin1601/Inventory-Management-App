@@ -99,7 +99,7 @@ export default function SiteRecordsPage() {
         }
       }
 
-      setProjects(projRes.projects);
+      setProjects(projRes);
       setOrders(orderRes.filter(o => o.type === 'PURCHASE'));
       setCatalogItems(prodRes);
       setReceipts(receiptRows);
@@ -108,11 +108,6 @@ export default function SiteRecordsPage() {
     loadData();
 
   }, []);
-
-  const saveReceipts = (data: DeliveryReceiptRow[]) => {
-    setReceipts(data);
-    modulesService.saveDeliveryReceipts(data);
-  };
 
   const saveSlips = (data: PaymentSlipRow[]) => {
     setSlips(data);
@@ -196,11 +191,15 @@ export default function SiteRecordsPage() {
 
     if (!confirmed.confirmed) return;
 
-    const next = slips.map(s => s.id === id ? { ...s, status } : s);
-    saveSlips(next);
-    
     try {
       const currentUser = await modulesService.getCurrentUser();
+      await modulesService.updatePaymentSlip(id, {
+        status,
+        ref_no: status === 'PAID' ? (confirmed.reason || slip.ref_no) : slip.ref_no,
+      });
+      const refreshed = await modulesService.getPaymentSlips();
+      setSlips(refreshed);
+
       await modulesService.addAudit({
         action: 'PAYMENT_STATUS_UPDATED',
         entity_type: 'payment',
@@ -214,13 +213,22 @@ export default function SiteRecordsPage() {
       });
       showToast(`Status updated to ${status}`, 'success');
     } catch (error) {
-      console.error('Failed to add payment status audit:', error);
+      console.error('Failed to update payment status:', error);
+      showToast('Could not update payment status in database', 'error');
     }
   };
 
-  const updateSlipDueDate = (id: string, date: string) => {
-    const next = slips.map(s => s.id === id ? { ...s, due_date: date } : s);
-    saveSlips(next);
+  const updateSlipDueDate = async (id: string, date: string) => {
+    const slip = slips.find((entry) => entry.id === id);
+    if (!slip) return;
+
+    try {
+      await modulesService.updatePaymentSlip(id, { due_date: date });
+      setSlips((current) => current.map((entry) => (entry.id === id ? { ...entry, due_date: date } : entry)));
+    } catch (error) {
+      console.error('Failed to update payment due date:', error);
+      showToast(`Could not update due date for ${slip.slip_no}`, 'error');
+    }
   };
 
   const handleCreatePayment = async (e: React.FormEvent) => {
@@ -251,34 +259,43 @@ export default function SiteRecordsPage() {
 
     if (!confirmed.confirmed) return;
 
-    saveSlips([slip, ...slips]);
-    setCreatePaymentOpen(false);
-    setNewPayment({
-      date: new Date().toISOString().split('T')[0],
-      due_date: new Date().toISOString().split('T')[0],
-      payment_method: 'BANK_TRANSFER',
-      status: 'ISSUED'
-    });
     try {
       const currentUser = await modulesService.getCurrentUser();
+      const result = await modulesService.createPaymentSlip(slip, currentUser?.id || 'anonymous');
+      const finalSlip = {
+        ...slip,
+        id: result.id,
+        slip_no: result.slip_no,
+        prepared_by: currentUser?.full_name || slip.prepared_by,
+      };
+      setSlips((current) => [finalSlip, ...current]);
+      setCreatePaymentOpen(false);
+      setNewPayment({
+        date: new Date().toISOString().split('T')[0],
+        due_date: new Date().toISOString().split('T')[0],
+        payment_method: 'BANK_TRANSFER',
+        status: 'ISSUED'
+      });
+
       await modulesService.addAudit({
         action: 'PAYMENT_CREATED',
         entity_type: 'payment',
-        entity_id: slip.id,
-        entity_name: slip.slip_no,
-        reason: `Payment slip issued for ${slip.vendor_name}`,
+        entity_id: result.id,
+        entity_name: result.slip_no,
+        reason: `Payment slip issued for ${finalSlip.vendor_name}`,
         performed_by: currentUser?.email || 'Unknown',
-        details: `${slip.po_ref || 'Manual Entry'} | ${formatCurrency(slip.amount)}`,
+        details: `${finalSlip.po_ref || 'Manual Entry'} | ${formatCurrency(finalSlip.amount)}`,
         new_values: {
-          vendor_name: slip.vendor_name,
-          amount: slip.amount,
-          payment_method: slip.payment_method,
-          status: slip.status
+          vendor_name: finalSlip.vendor_name,
+          amount: finalSlip.amount,
+          payment_method: finalSlip.payment_method,
+          status: finalSlip.status
         }
       });
       showToast('Payment Recorded', 'success');
     } catch (error) {
-      console.error('Failed to add payment audit:', error);
+      console.error('Failed to create payment:', error);
+      showToast('Could not save payment to database', 'error');
     }
   };
 
@@ -461,10 +478,10 @@ export default function SiteRecordsPage() {
                                 requireReason: true,
                               });
                               if (confirmed.confirmed) {
-                                const next = slips.filter(x => x.id !== s.id);
-                                saveSlips(next);
                                 try {
                                   const currentUser = await modulesService.getCurrentUser();
+                                  await modulesService.deletePaymentSlip(s.id, currentUser?.id || 'anonymous');
+                                  setSlips((current) => current.filter((entry) => entry.id !== s.id));
                                   await modulesService.addAudit({
                                     action: 'PAYMENT_DELETED',
                                     entity_type: 'payment',
@@ -481,7 +498,8 @@ export default function SiteRecordsPage() {
                                   });
                                   showToast('Payment slip deleted', 'success');
                                 } catch (error) {
-                                  console.error('Failed to add payment deletion audit:', error);
+                                  console.error('Failed to delete payment slip:', error);
+                                  showToast('Could not delete payment slip from database', 'error');
                                 }
                               }
                           }}><Trash2 size={14} /></button>
@@ -523,8 +541,8 @@ export default function SiteRecordsPage() {
                       const proj = projects.find(p => p.name === pname);
                     if(proj && newReceipt.type === 'SITE_DELIVERY') {
                       projectsService.listBoqItems(proj.id).then(res => {
-                        const pendingItems = res.items
-                          .map(i => ({ 
+                        const pendingItems = res
+                          .map((i) => ({ 
                             id: i.id, 
                             name: i.item_name, 
                             variant_id: i.variant_id,

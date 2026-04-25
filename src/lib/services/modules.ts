@@ -66,6 +66,9 @@ export const modulesService = {
   deleteDeliveryReceipt: dbService.deleteDeliveryReceipt.bind(dbService),
   getPaymentSlips: dbService.getPaymentSlips.bind(dbService),
   savePaymentSlips: dbService.savePaymentSlips.bind(dbService),
+  createPaymentSlip: dbService.createPaymentSlip.bind(dbService),
+  updatePaymentSlip: dbService.updatePaymentSlip.bind(dbService),
+  deletePaymentSlip: dbService.deletePaymentSlip.bind(dbService),
 
   // Debug methods
   _debugResetAllData: async () => {

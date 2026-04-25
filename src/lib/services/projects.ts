@@ -1,7 +1,5 @@
 import { supabase } from '../supabase';
 
-export type DataSource = 'supabase' | 'local';
-
 export type ProjectRecord = {
   id: string;
   name: string;
@@ -27,9 +25,6 @@ export type BoqItemRecord = {
   created_at?: string;
 };
 
-const PROJECTS_KEY = 'ims_projects_v1';
-const BOQ_ITEMS_KEY = 'ims_project_boq_items_v1';
-
 const BOQ_TABLE_CANDIDATES = ['boq_items', 'project_boq_items', 'boq_lines'] as const;
 
 function safeString(value: unknown) {
@@ -48,53 +43,6 @@ function makeId(prefix: string) {
       ? crypto.randomUUID()
       : Math.random().toString(36).slice(2, 10);
   return `${prefix}_${random}`;
-}
-
-function readLocalProjects(): ProjectRecord[] {
-  if (typeof window === 'undefined') return [];
-  const raw = window.localStorage.getItem(PROJECTS_KEY);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .map((row) => normalizeProject(row as Record<string, unknown>))
-      .filter((row) => row.id && row.name);
-  } catch {
-    return [];
-  }
-}
-
-function writeLocalProjects(projects: ProjectRecord[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(PROJECTS_KEY, JSON.stringify(projects));
-}
-
-function readLocalBoqItems(): Record<string, BoqItemRecord[]> {
-  if (typeof window === 'undefined') return {};
-  const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
-  if (!raw) return {};
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== 'object') return {};
-    const rawState = parsed as Record<string, unknown>;
-    const state: Record<string, BoqItemRecord[]> = {};
-    Object.entries(rawState).forEach(([key, value]) => {
-      if (Array.isArray(value)) {
-        state[key] = value
-          .map((row) => normalizeBoqItem(row as Record<string, unknown>))
-          .filter((row) => row.id && row.item_name);
-      }
-    });
-    return state;
-  } catch {
-    return {};
-  }
-}
-
-function writeLocalBoqItems(state: Record<string, BoqItemRecord[]>) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
 }
 
 function normalizeProject(row: Record<string, unknown>): ProjectRecord {
@@ -116,6 +64,7 @@ function normalizeBoqItem(row: Record<string, unknown>): BoqItemRecord {
     id: safeString(row.id || ''),
     project_id: safeString(row.project_id || row.projectId || ''),
     variant_id: safeString(row.variant_id || row.variantId || row.variant || ''),
+    warehouse_id: safeString(row.warehouse_id || row.warehouseId || row.warehouse || ''),
     item_name: safeString(row.item_name || row.item || row.description || row.name || ''),
     manufacturer: safeString(row.manufacturer || row.manufacturers || row.brand || row.make || ''),
     quantity: safeNumber(row.quantity || row.qty || 0, 0),
@@ -126,280 +75,218 @@ function normalizeBoqItem(row: Record<string, unknown>): BoqItemRecord {
   };
 }
 
-function isMissingTableError(error: unknown) {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: string; message?: string; details?: string; status?: number };
-  const message = `${candidate.message || ''} ${candidate.details || ''}`.toLowerCase();
-  return (
-    candidate.status === 404 ||
-    candidate.code === 'PGRST205' ||
-    candidate.code === '42P01' ||
-    message.includes('could not find') ||
-    message.includes('relation') ||
-    message.includes('not found')
-  );
-}
-
-function isMissingColumnError(error: unknown) {
-  if (!error || typeof error !== 'object') return false;
-  const candidate = error as { code?: string; message?: string; details?: string; status?: number };
-  const message = `${candidate.message || ''} ${candidate.details || ''}`.toLowerCase();
-  return candidate.code === '42703' || message.includes('column') || message.includes('does not exist');
-}
-
-async function pickBoqTable(): Promise<(typeof BOQ_TABLE_CANDIDATES)[number] | null> {
+async function pickBoqTable(): Promise<(typeof BOQ_TABLE_CANDIDATES)[number]> {
   for (const table of BOQ_TABLE_CANDIDATES) {
     const probe = await supabase.from(table).select('id', { count: 'exact', head: true }).limit(1);
     if (!probe.error) return table;
-    if (!isMissingTableError(probe.error)) return table;
   }
-  return null;
+  // Default to first candidate if all fail - let the caller handle the error
+  throw new Error('BOQ table not found. Please contact your administrator.');
+}
+
+function getMissingColumnName(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { code?: string; message?: string };
+  if (candidate.code !== 'PGRST204' || !candidate.message) return null;
+
+  const match = candidate.message.match(/Could not find the '([^']+)' column/i);
+  return match?.[1] || null;
+}
+
+async function insertBoqWithFallback(table: string, payload: Record<string, unknown>) {
+  let nextPayload = { ...payload };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const insert = await supabase.from(table).insert(nextPayload).select('*').single();
+    if (!insert.error) return insert;
+
+    const missingColumn = getMissingColumnName(insert.error);
+    if (!missingColumn || !(missingColumn in nextPayload)) {
+      return insert;
+    }
+
+    delete nextPayload[missingColumn];
+  }
+
+  return await supabase.from(table).insert(nextPayload).select('*').single();
+}
+
+async function updateBoqWithFallback(table: string, boqItemId: string, payload: Record<string, unknown>) {
+  let nextPayload = { ...payload };
+
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    const update = await supabase
+      .from(table)
+      .update(nextPayload)
+      .eq('id', boqItemId)
+      .select('*')
+      .single();
+
+    if (!update.error) return update;
+
+    const missingColumn = getMissingColumnName(update.error);
+    if (!missingColumn || !(missingColumn in nextPayload)) {
+      return update;
+    }
+
+    delete nextPayload[missingColumn];
+    if (Object.keys(nextPayload).length === 0) {
+      throw new Error(`None of the BOQ fields can be updated because the table is missing supported columns.`);
+    }
+  }
+
+  return await supabase
+    .from(table)
+    .update(nextPayload)
+    .eq('id', boqItemId)
+    .select('*')
+    .single();
 }
 
 export const projectsService = {
-  async listProjects(): Promise<{ source: DataSource; projects: ProjectRecord[]; warning?: string }> {
-    const response = await supabase.from('projects').select('*');
+  async listProjects(): Promise<ProjectRecord[]> {
+    const response = await supabase.from('projects').select('*').order('created_at', { ascending: false });
 
     if (response.error) {
-      if (isMissingTableError(response.error)) {
-        return {
-          source: 'local',
-          projects: readLocalProjects(),
-          warning: 'Projects are saved only on this device because the Projects table is not available.',
-        };
-      }
-
-      return {
-        source: 'local',
-        projects: readLocalProjects(),
-        warning: 'Unable to load projects from server; showing local projects.',
-      };
+      console.error('Failed to fetch projects:', response.error);
+      throw new Error(`Failed to fetch projects: ${response.error.message}`);
     }
 
     const normalized = (response.data || []).map((row) => normalizeProject(row as Record<string, unknown>));
-    const filtered = (response.data || []).map((row, index) => ({ raw: row as Record<string, unknown>, normalized: normalized[index] }))
-      .filter((item) => item.normalized.id && item.normalized.name)
-      .filter((item) => item.raw.deleted_at == null)
-      .map((item) => item.normalized);
+    const filtered = normalized
+      .filter((item) => item.id && item.name)
+      .filter((row) => {
+        const rawRow = response.data?.find((d) => d.id === row.id) as any;
+        return rawRow?.deleted_at == null;
+      });
 
-    return { source: 'supabase', projects: filtered };
+    return filtered;
   },
 
-  async createProject(input: { name: string; client_name: string; delivery_address?: string; code?: string }) {
+  async createProject(input: { name: string; client_name: string; delivery_address?: string; code?: string }): Promise<ProjectRecord> {
     const name = input.name.trim();
+    if (!name) throw new Error('Project name is required');
+
     const code = input.code?.trim() || '';
     const client_name = input.client_name.trim();
+    if (!client_name) throw new Error('Client name is required');
+
     const delivery_address = input.delivery_address?.trim() || '';
 
-    const list = await this.listProjects();
-
-    if (list.source === 'local') {
-      const now = new Date().toISOString();
-      const next: ProjectRecord = {
-        id: makeId('project'),
-        name,
-        code,
-        client_name,
-        delivery_address,
-        created_at: now,
-        updated_at: now,
-        status: 'ACTIVE',
-      };
-      const updated = [next, ...list.projects];
-      writeLocalProjects(updated);
-      return { source: 'local' as const, project: next };
-    }
-
-    const payload: Record<string, unknown> = { name };
+    const payload: Record<string, unknown> = { name, client_name };
     if (code) payload.code = code;
-    if (client_name) payload.client_name = client_name;
     if (delivery_address) payload.delivery_address = delivery_address;
 
     const insert = await supabase.from('projects').insert(payload).select('*').single();
+    
     if (insert.error) {
-      if (isMissingColumnError(insert.error)) {
-        const fallbackPayload: Record<string, unknown> = { name };
-        if (code) fallbackPayload.code = code;
-        if (client_name) fallbackPayload.client = client_name;
-        if (delivery_address) fallbackPayload.delivery_address = delivery_address;
-        const fallbackInsert = await supabase.from('projects').insert(fallbackPayload).select('*').single();
-        if (fallbackInsert.error) {
-          if (isMissingColumnError(fallbackInsert.error)) {
-            const legacyPayload: Record<string, unknown> = { name };
-            if (code) legacyPayload.code = code;
-            if (client_name) legacyPayload.client = client_name;
-            if (delivery_address) legacyPayload.address = delivery_address;
-            const legacyInsert = await supabase.from('projects').insert(legacyPayload).select('*').single();
-            if (legacyInsert.error) throw legacyInsert.error;
-            return { source: 'supabase' as const, project: normalizeProject(legacyInsert.data as Record<string, unknown>) };
-          }
-          throw fallbackInsert.error;
-        }
-        return { source: 'supabase' as const, project: normalizeProject(fallbackInsert.data as Record<string, unknown>) };
-      }
-      throw insert.error;
+      console.error('Failed to create project:', insert.error);
+      throw new Error(`Failed to create project: ${insert.error.message}`);
     }
-    return { source: 'supabase' as const, project: normalizeProject(insert.data as Record<string, unknown>) };
+
+    return normalizeProject(insert.data as Record<string, unknown>);
   },
 
-  async getProject(projectId: string) {
+  async getProject(projectId: string): Promise<ProjectRecord | null> {
     const response = await supabase.from('projects').select('*').eq('id', projectId).single();
-    if (response.error) {
-      const local = readLocalProjects().find((p) => p.id === projectId);
-      return { source: 'local' as const, project: local || null };
-    }
-    return { source: 'supabase' as const, project: normalizeProject(response.data as Record<string, unknown>) };
-  },
-
-  async updateProject(input: { projectId: string; name: string; client_name: string; delivery_address?: string; code?: string }) {
-    const name = input.name.trim();
-    const code = input.code?.trim() || '';
-    const client_name = input.client_name.trim();
-    const delivery_address = input.delivery_address?.trim() || '';
-
-    const list = await this.listProjects();
-
-    if (list.source === 'local') {
-      const next = list.projects.map((p) =>
-        p.id === input.projectId
-          ? { ...p, name, code, client_name, delivery_address, updated_at: new Date().toISOString() }
-          : p,
-      );
-      writeLocalProjects(next);
-      const updated = next.find((p) => p.id === input.projectId) || null;
-      return { source: 'local' as const, project: updated };
-    }
-
-    const payload: Record<string, unknown> = { name };
-    if (code) payload.code = code;
-    if (client_name) payload.client_name = client_name;
-    if (delivery_address) payload.delivery_address = delivery_address;
-
-    const update = await supabase.from('projects').update(payload).eq('id', input.projectId).select('*').single();
-    if (update.error) {
-      if (isMissingColumnError(update.error)) {
-        const fallbackPayload: Record<string, unknown> = { name };
-        if (code) fallbackPayload.code = code;
-        if (client_name) fallbackPayload.client = client_name;
-        if (delivery_address) fallbackPayload.delivery_address = delivery_address;
-        const fallbackUpdate = await supabase
-          .from('projects')
-          .update(fallbackPayload)
-          .eq('id', input.projectId)
-          .select('*')
-          .single();
-        if (fallbackUpdate.error) {
-          if (isMissingColumnError(fallbackUpdate.error)) {
-            const legacyPayload: Record<string, unknown> = { name };
-            if (code) legacyPayload.code = code;
-            if (client_name) legacyPayload.client = client_name;
-            if (delivery_address) legacyPayload.address = delivery_address;
-            const legacyUpdate = await supabase
-              .from('projects')
-              .update(legacyPayload)
-              .eq('id', input.projectId)
-              .select('*')
-              .single();
-            if (legacyUpdate.error) throw legacyUpdate.error;
-            return { source: 'supabase' as const, project: normalizeProject(legacyUpdate.data as Record<string, unknown>) };
-          }
-          throw fallbackUpdate.error;
-        }
-        return { source: 'supabase' as const, project: normalizeProject(fallbackUpdate.data as Record<string, unknown>) };
-      }
-      throw update.error;
-    }
-    return { source: 'supabase' as const, project: normalizeProject(update.data as Record<string, unknown>) };
-  },
-
-  async deleteProject(projectId: string): Promise<{ source: DataSource }> {
-    // 1. Try to delete from Supabase
-    // Note: We rely on ON DELETE CASCADE in the database for production-level integrity.
-    const response = await supabase.from('projects').delete().eq('id', projectId);
     
     if (response.error) {
-      console.error('Database deletion failed:', response.error);
+      if (response.error.code === 'PGRST116') {
+        // Record not found
+        return null;
+      }
+      console.error('Failed to fetch project:', response.error);
+      throw new Error(`Failed to fetch project: ${response.error.message}`);
+    }
+
+    return normalizeProject(response.data as Record<string, unknown>);
+  },
+
+  async updateProject(input: {
+    projectId: string;
+    name: string;
+    client_name: string;
+    delivery_address?: string;
+    code?: string;
+  }): Promise<ProjectRecord> {
+    const name = input.name.trim();
+    if (!name) throw new Error('Project name is required');
+
+    const code = input.code?.trim() || '';
+    const client_name = input.client_name.trim();
+    if (!client_name) throw new Error('Client name is required');
+
+    const delivery_address = input.delivery_address?.trim() || '';
+
+    const payload: Record<string, unknown> = { name, client_name };
+    if (code) payload.code = code;
+    if (delivery_address) payload.delivery_address = delivery_address;
+
+    const update = await supabase
+      .from('projects')
+      .update(payload)
+      .eq('id', input.projectId)
+      .select('*')
+      .single();
+
+    if (update.error) {
+      console.error('Failed to update project:', update.error);
+      throw new Error(`Failed to update project: ${update.error.message}`);
+    }
+
+    return normalizeProject(update.data as Record<string, unknown>);
+  },
+
+  async deleteProject(projectId: string): Promise<void> {
+    const response = await supabase.from('projects').delete().eq('id', projectId);
+
+    if (response.error) {
+      console.error('Failed to delete project:', response.error);
       
-      // If it's a foreign key error, give a clear instruction
+      // Specific error for foreign key constraint
       if (response.error.code === '23503') {
-        throw new Error('Cannot delete: This project has active challans or BOQ items linked to it.');
+        throw new Error('Cannot delete this project because it has active BOQ items or other linked data. Please remove these dependencies first.');
       }
       
-      if (isMissingTableError(response.error)) {
-        const next = readLocalProjects().filter((p) => p.id !== projectId);
-        writeLocalProjects(next);
-        return { source: 'local' };
-      }
-      throw response.error;
+      throw new Error(`Failed to delete project: ${response.error.message}`);
     }
-
-    // 2. Also clean up Local Storage if any exists
-    const nextLocal = readLocalProjects().filter((p) => p.id !== projectId);
-    writeLocalProjects(nextLocal);
-
-    return { source: 'supabase' };
   },
 
-  async listBoqItems(projectId: string): Promise<{ source: DataSource; items: BoqItemRecord[]; warning?: string }> {
+  async listBoqItems(projectId: string): Promise<BoqItemRecord[]> {
     const table = await pickBoqTable();
-    if (!table) {
-      const state = readLocalBoqItems();
-      return { source: 'local', items: state[projectId] || [], warning: 'BOQ is saved only on this device.' };
-    }
 
-    const response = await supabase.from(table).select('*').eq('project_id', projectId);
+    const response = await supabase
+      .from(table)
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: true });
+
     if (response.error) {
-      if (isMissingTableError(response.error)) {
-        const state = readLocalBoqItems();
-        return { source: 'local', items: state[projectId] || [], warning: 'BOQ is saved only on this device.' };
-      }
-      const state = readLocalBoqItems();
-      return { source: 'local', items: state[projectId] || [], warning: 'Unable to load BOQ from server; showing local BOQ.' };
+      console.error('Failed to fetch BOQ items:', response.error);
+      throw new Error(`Failed to fetch BOQ items: ${response.error.message}`);
     }
 
-    return {
-      source: 'supabase',
-      items: (response.data || [])
-        .map((row) => normalizeBoqItem(row as Record<string, unknown>))
-        .filter((row) => row.id && row.item_name),
-    };
+    return (response.data || [])
+      .map((row) => normalizeBoqItem(row as Record<string, unknown>))
+      .filter((row) => row.id && row.item_name);
   },
 
-  async listAllBoqItems(): Promise<{ source: DataSource; items: BoqItemRecord[]; warning?: string }> {
+  async listAllBoqItems(): Promise<BoqItemRecord[]> {
     const table = await pickBoqTable();
-    if (!table) {
-      const state = readLocalBoqItems();
-      return {
-        source: 'local',
-        items: Object.values(state).flat(),
-        warning: 'BOQ is saved only on this device.',
-      };
-    }
 
-    const response = await supabase.from(table).select('*');
+    const response = await supabase
+      .from(table)
+      .select('*')
+      .order('created_at', { ascending: true });
+
     if (response.error) {
-      if (isMissingTableError(response.error)) {
-        const state = readLocalBoqItems();
-        return {
-          source: 'local',
-          items: Object.values(state).flat(),
-          warning: 'BOQ is saved only on this device.',
-        };
-      }
-      const state = readLocalBoqItems();
-      return {
-        source: 'local',
-        items: Object.values(state).flat(),
-        warning: 'Unable to load BOQ from server; showing local BOQ.',
-      };
+      console.error('Failed to fetch all BOQ items:', response.error);
+      throw new Error(`Failed to fetch BOQ items: ${response.error.message}`);
     }
 
-    return {
-      source: 'supabase',
-      items: (response.data || [])
-        .map((row) => normalizeBoqItem(row as Record<string, unknown>))
-        .filter((row) => row.id && row.item_name),
-    };
+    return (response.data || [])
+      .map((row) => normalizeBoqItem(row as Record<string, unknown>))
+      .filter((row) => row.id && row.item_name);
   },
 
   async addBoqItem(input: {
@@ -412,85 +299,103 @@ export const projectsService = {
     delivered?: number;
     unit: string;
     notes?: string;
-  }) {
+  }): Promise<BoqItemRecord> {
     const table = await pickBoqTable();
+
     const trimmedName = input.item_name.trim();
-    const trimmedManufacturer = input.manufacturer?.trim() || '';
+    if (!trimmedName) throw new Error('Item name is required');
+
     const trimmedUnit = input.unit.trim();
+    if (!trimmedUnit) throw new Error('Unit is required');
+
+    if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+      throw new Error('Quantity must be a positive number');
+    }
+
+    const trimmedManufacturer = input.manufacturer?.trim() || '';
     const trimmedNotes = input.notes?.trim() || '';
     const delivered = typeof input.delivered === 'number' && Number.isFinite(input.delivered) ? input.delivered : 0;
-
-    if (!table) {
-      const state = readLocalBoqItems();
-      const now = new Date().toISOString();
-      const next: BoqItemRecord = {
-        id: makeId('boq'),
-        project_id: input.projectId,
-        variant_id: input.variant_id,
-        warehouse_id: input.warehouse_id,
-        item_name: trimmedName,
-        manufacturer: trimmedManufacturer,
-        quantity: input.quantity,
-        delivered,
-        unit: trimmedUnit,
-        notes: trimmedNotes,
-        created_at: now,
-      };
-      const updated = { ...state, [input.projectId]: [next, ...(state[input.projectId] || [])] };
-      writeLocalBoqItems(updated);
-      return { source: 'local' as const, item: next };
-    }
 
     const payload: Record<string, unknown> = {
       project_id: input.projectId,
       item_name: trimmedName,
       quantity: input.quantity,
+      delivered,
       unit: trimmedUnit,
-      notes: trimmedNotes,
     };
 
+    if (input.variant_id) payload.variant_id = input.variant_id;
+    if (input.warehouse_id) payload.warehouse_id = input.warehouse_id;
     if (trimmedManufacturer) payload.manufacturer = trimmedManufacturer;
-    if (delivered) payload.delivered = delivered;
+    if (trimmedNotes) payload.notes = trimmedNotes;
 
-    const insert = await supabase.from(table).insert(payload).select('*').single();
+    const insert = await insertBoqWithFallback(table, payload);
 
     if (insert.error) {
-      if (isMissingColumnError(insert.error)) {
-        const fallbackPayload: Record<string, unknown> = {
-          project_id: input.projectId,
-          item_name: trimmedName,
-          quantity: input.quantity,
-          unit: trimmedUnit,
-          notes: trimmedNotes,
-        };
-        if (trimmedManufacturer) fallbackPayload.manufacturer = trimmedManufacturer;
-        if (delivered) fallbackPayload.delivered = delivered;
-
-        const fallbackInsert = await supabase
-          .from(table)
-          .insert(fallbackPayload)
-          .select('*')
-          .single();
-        if (fallbackInsert.error) throw fallbackInsert.error;
-        return { source: 'supabase' as const, item: normalizeBoqItem(fallbackInsert.data as Record<string, unknown>) };
-      }
-      throw insert.error;
+      console.error('Failed to add BOQ item:', insert.error);
+      throw new Error(`Failed to add BOQ item: ${insert.error.message}`);
     }
 
-    return { source: 'supabase' as const, item: normalizeBoqItem(insert.data as Record<string, unknown>) };
+    return normalizeBoqItem(insert.data as Record<string, unknown>);
   },
 
-  async deleteBoqItem(projectId: string, boqItemId: string) {
+  async updateBoqItem(input: {
+    projectId: string;
+    boqItemId: string;
+    item_name?: string;
+    manufacturer?: string;
+    quantity?: number;
+    unit?: string;
+    warehouse_id?: string;
+    delivered?: number;
+  }): Promise<BoqItemRecord> {
     const table = await pickBoqTable();
-    if (!table) {
-      const state = readLocalBoqItems();
-      const next = (state[projectId] || []).filter((item) => item.id !== boqItemId);
-      writeLocalBoqItems({ ...state, [projectId]: next });
-      return { source: 'local' as const };
+
+    const payload: Record<string, unknown> = {};
+
+    if (input.item_name !== undefined) {
+      const trimmed = input.item_name.trim();
+      if (!trimmed) throw new Error('Item name cannot be empty');
+      payload.item_name = trimmed;
     }
 
+    if (input.manufacturer !== undefined) payload.manufacturer = input.manufacturer.trim();
+    if (input.quantity !== undefined) {
+      if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
+        throw new Error('Quantity must be a positive number');
+      }
+      payload.quantity = input.quantity;
+    }
+    if (input.unit !== undefined) {
+      const trimmed = input.unit.trim();
+      if (!trimmed) throw new Error('Unit cannot be empty');
+      payload.unit = trimmed;
+    }
+    if (input.warehouse_id !== undefined) payload.warehouse_id = input.warehouse_id;
+    if (input.delivered !== undefined) payload.delivered = input.delivered;
+
+    if (Object.keys(payload).length === 0) {
+      throw new Error('No fields to update');
+    }
+
+    const update = await updateBoqWithFallback(table, input.boqItemId, payload);
+
+    if (update.error) {
+      console.error('Failed to update BOQ item:', update.error);
+      throw new Error(`Failed to update BOQ item: ${update.error.message}`);
+    }
+
+    return normalizeBoqItem(update.data as Record<string, unknown>);
+  },
+
+  async deleteBoqItem(projectId: string, boqItemId: string): Promise<void> {
+    const table = await pickBoqTable();
+
     const del = await supabase.from(table).delete().eq('id', boqItemId);
-    if (del.error) throw del.error;
-    return { source: 'supabase' as const };
+
+    if (del.error) {
+      console.error('Failed to delete BOQ item:', del.error);
+      throw new Error(`Failed to delete BOQ item: ${del.error.message}`);
+    }
   },
 };

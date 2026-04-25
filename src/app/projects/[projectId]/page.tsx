@@ -4,8 +4,8 @@ import React from 'react';
 import styles from './ProjectDetail.module.css';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
-import { ArrowLeft, Plus, Trash2, X } from 'lucide-react';
-import { projectsService, type BoqItemRecord, type DataSource, type ProjectRecord } from '@/lib/services/projects';
+import { ArrowLeft, Plus, Trash2, X, Edit2 } from 'lucide-react';
+import { projectsService, type BoqItemRecord, type ProjectRecord } from '@/lib/services/projects';
 import { useUi } from '@/components/ui/AppProviders';
 import SearchableSelect from '@/components/ui/SearchableSelect';
 import { inventoryService } from '@/lib/services/inventory';
@@ -18,15 +18,60 @@ function normalizeQty(value: string) {
   return parsed;
 }
 
+function normalizeText(value: string | undefined) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function matchesBoqToVariant(
+  boqItem: BoqItemRecord,
+  variant: {
+    id: string;
+    sku: string;
+    productName: string;
+    manufacturer: string;
+    unit: string;
+    label: string;
+  },
+) {
+  if (boqItem.variant_id && boqItem.variant_id === variant.id) return true;
+
+  const itemName = normalizeText(boqItem.item_name);
+  const productName = normalizeText(variant.productName);
+  const sku = normalizeText(variant.sku);
+  const label = normalizeText(variant.label);
+  const boqManufacturer = normalizeText(boqItem.manufacturer);
+  const variantManufacturer = normalizeText(variant.manufacturer);
+  const boqUnit = normalizeText(boqItem.unit);
+  const variantUnit = normalizeText(variant.unit);
+
+  if (!itemName) return false;
+  if (sku && (itemName === sku || itemName.includes(sku))) return true;
+  if (itemName === productName || itemName === label) return true;
+
+  const itemNameSkuMatch = itemName.match(/\(([^)]+)\)/);
+  if (itemNameSkuMatch && sku && itemNameSkuMatch[1].trim().toLowerCase() !== sku) {
+    return false;
+  }
+
+  if (productName && itemName.includes(productName)) return true;
+  if (boqManufacturer && variantManufacturer && boqManufacturer === variantManufacturer && productName && itemName.includes(productName)) {
+    return true;
+  }
+  if (boqUnit && variantUnit && boqUnit === variantUnit && productName && itemName.includes(productName)) {
+    return true;
+  }
+
+  return false;
+}
+
 export default function ProjectBoqPage() {
   const ui = useUi();
   const params = useParams<{ projectId: string }>();
   const projectId = params.projectId;
 
   const [project, setProject] = React.useState<ProjectRecord | null>(null);
-  const [projectSource, setProjectSource] = React.useState<DataSource>('supabase');
   const [items, setItems] = React.useState<BoqItemRecord[]>([]);
-  const [itemsSource, setItemsSource] = React.useState<DataSource>('supabase');
+  const [allBoqItems, setAllBoqItems] = React.useState<BoqItemRecord[]>([]);
   const [warning, setWarning] = React.useState('');
   const [isLoading, setIsLoading] = React.useState(true);
 
@@ -38,8 +83,13 @@ export default function ProjectBoqPage() {
   const [unit, setUnit] = React.useState(DEFAULT_UNIT);
   const [qty, setQty] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
+
+  const [editDialogOpen, setEditDialogOpen] = React.useState(false);
+  const [editingItem, setEditingItem] = React.useState<BoqItemRecord | null>(null);
+  const [editQty, setEditQty] = React.useState('');
   const [catalogOptions, setCatalogOptions] = React.useState<Array<{ value: string; label: string; keywords?: string[] }>>([]);
   const [extraItemOptions, setExtraItemOptions] = React.useState<Array<{ value: string; label: string; keywords?: string[] }>>([]);
+  const [promisedStock, setPromisedStock] = React.useState<Record<string, { thisProject: number; otherProjects: number }>>({}); // variant_id -> {thisProject, otherProjects}
 
   const [catalogMeta, setCatalogMeta] = React.useState<Record<string, { 
     name: string; 
@@ -47,7 +97,7 @@ export default function ProjectBoqPage() {
     unit: string; 
     label: string; 
     stock: number;
-    stock_data?: Array<{ warehouse_name: string; quantity: number }>;
+    stock_data?: Array<{ warehouse_id?: string; warehouse_name: string; quantity: number }>;
   }>>({});
   const [selectedVariantStock, setSelectedVariantStock] = React.useState<number | null>(null);
   const [nameToMeta, setNameToMeta] = React.useState(new Map<string, { manufacturer: string; unit: string; stock: number; variantId: string; stock_data?: any[] }>());
@@ -55,22 +105,38 @@ export default function ProjectBoqPage() {
   const [warehouses, setWarehouses] = React.useState<Array<{ id: string; name: string }>>([]);
   const [selectedWarehouseId, setSelectedWarehouseId] = React.useState('');
 
+  const catalogVariants = React.useMemo(() => (
+    Object.entries(catalogMeta).map(([variantId, meta]) => {
+      const skuMatch = meta.label.match(/\(([^)]+)\)\s*$/);
+      return {
+        id: variantId,
+        sku: skuMatch?.[1] || '',
+        productName: meta.name,
+        manufacturer: meta.manufacturer,
+        unit: meta.unit,
+        label: meta.label,
+      };
+    })
+  ), [catalogMeta]);
+
   const load = React.useCallback(async () => {
     setIsLoading(true);
+    setWarning('');
     try {
-      const [projectResult, itemsResult] = await Promise.all([
+      const [projectResult, itemsResult, allItemsResult] = await Promise.all([
         projectsService.getProject(projectId),
         projectsService.listBoqItems(projectId),
+        projectsService.listAllBoqItems(),
       ]);
 
-      setProjectSource(projectResult.source);
-      setProject(projectResult.project);
-      setItemsSource(itemsResult.source);
-      setWarning(itemsResult.warning || '');
-      setItems(itemsResult.items);
+      setProject(projectResult);
+      setItems(itemsResult);
+      setAllBoqItems(allItemsResult);
     } catch (err) {
       console.error(err);
-      ui.showToast('Unable to load BOQ right now.', 'error');
+      const errorMsg = err instanceof Error ? err.message : 'Unable to load project data';
+      setWarning(errorMsg);
+      ui.showToast(errorMsg, 'error');
     } finally {
       setIsLoading(false);
     }
@@ -142,6 +208,115 @@ export default function ProjectBoqPage() {
     void loadCatalogAndUnits();
   }, [loadCatalogAndUnits]);
 
+  React.useEffect(() => {
+    const promised: Record<string, { thisProject: number; otherProjects: number }> = {};
+    allBoqItems.forEach((boqItem) => {
+      const matchedVariant = catalogVariants.find((variant) => matchesBoqToVariant(boqItem, variant));
+      if (!matchedVariant) return;
+
+      if (!promised[matchedVariant.id]) {
+        promised[matchedVariant.id] = { thisProject: 0, otherProjects: 0 };
+      }
+
+      if (boqItem.project_id === projectId) {
+        promised[matchedVariant.id].thisProject += boqItem.quantity;
+      } else {
+        promised[matchedVariant.id].otherProjects += boqItem.quantity;
+      }
+    });
+
+    setPromisedStock(promised);
+  }, [allBoqItems, catalogVariants, projectId]);
+
+  const selectedVariantWarehouseBreakdown = React.useMemo(() => {
+    if (!selectedVariantId || !catalogMeta[selectedVariantId]) return [];
+
+    const selectedMeta = catalogMeta[selectedVariantId];
+    const relevantBoqItems = allBoqItems.filter((boqItem) => {
+      const matchedVariant = catalogVariants.find((variant) => matchesBoqToVariant(boqItem, variant));
+      return matchedVariant?.id === selectedVariantId;
+    });
+
+    const explicitThisProject = new Map<string, number>();
+    const explicitOtherProjects = new Map<string, number>();
+    let globalThisProject = 0;
+    let globalOtherProjects = 0;
+
+    relevantBoqItems.forEach((boqItem) => {
+      const remaining = Math.max((boqItem.quantity || 0) - (boqItem.delivered || 0), 0);
+      if (remaining <= 0) return;
+
+      if (boqItem.warehouse_id) {
+        const targetMap = boqItem.project_id === projectId ? explicitThisProject : explicitOtherProjects;
+        targetMap.set(boqItem.warehouse_id, (targetMap.get(boqItem.warehouse_id) || 0) + remaining);
+        return;
+      }
+
+      if (boqItem.project_id === projectId) {
+        globalThisProject += remaining;
+      } else {
+        globalOtherProjects += remaining;
+      }
+    });
+
+    let remainingThisGlobal = globalThisProject;
+    let remainingOtherGlobal = globalOtherProjects;
+
+    return (selectedMeta.stock_data || []).map((stockRow, index, rows) => {
+      const warehouseId = String(stockRow.warehouse_id || '');
+      const explicitThis = explicitThisProject.get(warehouseId) || 0;
+      const explicitOther = explicitOtherProjects.get(warehouseId) || 0;
+
+      const availableAfterExplicit = Math.max(stockRow.quantity - explicitThis - explicitOther, 0);
+      let allocatedThis = Math.min(availableAfterExplicit, remainingThisGlobal);
+      remainingThisGlobal -= allocatedThis;
+
+      const availableAfterThis = Math.max(availableAfterExplicit - allocatedThis, 0);
+      let allocatedOther = Math.min(availableAfterThis, remainingOtherGlobal);
+      remainingOtherGlobal -= allocatedOther;
+
+      const isLastRow = index === rows.length - 1;
+      if (isLastRow) {
+        allocatedThis += remainingThisGlobal;
+        allocatedOther += remainingOtherGlobal;
+        remainingThisGlobal = 0;
+        remainingOtherGlobal = 0;
+      }
+
+      const promisedThis = explicitThis + allocatedThis;
+      const promisedOther = explicitOther + allocatedOther;
+      const totalPromised = promisedThis + promisedOther;
+
+      return {
+        warehouseId,
+        warehouseName: stockRow.warehouse_name,
+        stock: stockRow.quantity,
+        promisedThis,
+        promisedOther,
+        free: stockRow.quantity - totalPromised,
+      };
+    });
+  }, [allBoqItems, catalogMeta, catalogVariants, projectId, selectedVariantId]);
+
+  const availableWarehouseOptions = React.useMemo(() => {
+    if (!selectedVariantId || !catalogMeta[selectedVariantId]) return [];
+
+    return (catalogMeta[selectedVariantId].stock_data || [])
+      .filter((stockRow) => Number(stockRow.quantity) > 0)
+      .map((stockRow) => ({
+        value: String(stockRow.warehouse_id || ''),
+        label: stockRow.warehouse_name,
+        keywords: [stockRow.warehouse_name],
+      }))
+      .filter((option) => option.value);
+  }, [catalogMeta, selectedVariantId]);
+
+  React.useEffect(() => {
+    if (!selectedWarehouseId) return;
+    if (availableWarehouseOptions.some((option) => option.value === selectedWarehouseId)) return;
+    setSelectedWarehouseId('');
+  }, [availableWarehouseOptions, selectedWarehouseId]);
+
   const openAdd = React.useCallback(() => {
     setExistingItemValue('');
     setSelectedVariantId('');
@@ -198,7 +373,7 @@ export default function ProjectBoqPage() {
     } finally {
       setIsSaving(false);
     }
-  }, [itemName, load, manufacturer, projectId, qty, selectedVariantId, selectedVariantStock, ui, unit]);
+  }, [itemName, load, manufacturer, projectId, qty, selectedVariantId, selectedWarehouseId, ui, unit]);
 
   const deleteItem = React.useCallback(
     async (boqItem: BoqItemRecord) => {
@@ -222,6 +397,40 @@ export default function ProjectBoqPage() {
     },
     [load, projectId, ui],
   );
+
+  const openEdit = React.useCallback((item: BoqItemRecord) => {
+    setEditingItem(item);
+    setEditQty(String(item.quantity));
+    setEditDialogOpen(true);
+  }, []);
+
+  const updateItem = React.useCallback(async () => {
+    if (!editingItem) return;
+
+    const parsedQty = normalizeQty(editQty);
+    if (!parsedQty) {
+      ui.showToast('Enter a valid quantity.', 'info');
+      return;
+    }
+
+    setIsSaving(true);
+    try {
+      await projectsService.updateBoqItem({
+        projectId,
+        boqItemId: editingItem.id,
+        quantity: parsedQty,
+      });
+      ui.showToast('BOQ item updated.', 'success');
+      setEditDialogOpen(false);
+      setEditingItem(null);
+      await load();
+    } catch (err) {
+      console.error(err);
+      ui.showToast('Could not update BOQ item.', 'error');
+    } finally {
+      setIsSaving(false);
+    }
+  }, [editingItem, editQty, load, projectId, ui]);
 
   const title = project?.name || 'Project';
   const clientLine = project?.client_name ? `Client: ${project.client_name}` : 'Client not set';
@@ -249,10 +458,7 @@ export default function ProjectBoqPage() {
 
       <div className={styles.card}>
         <div className={styles.toolbar}>
-          <div className={styles.toolbarTitle}>Bill of Quantities</div>
-          <div className={styles.subtitle}>
-            {itemsSource === 'local' ? 'Local' : 'Live'} • Project {projectSource === 'local' ? 'Local' : 'Live'}
-          </div>
+          <div className={styles.toolbarTitle}>Bill of Quantities {items.length > 0 && <span>({items.length})</span>}</div>
         </div>
 
         {warning ? <div className={styles.empty}>{warning}</div> : null}
@@ -295,6 +501,14 @@ export default function ProjectBoqPage() {
                       <td className={`${styles.deliveredValue} ${styles.numericCell}`}>{delivered}</td>
                       <td className={`${styles.balanceValue} ${styles.numericCell}`}>{balance}</td>
                       <td className={styles.actionsCell}>
+                        <button
+                          type="button"
+                          className={styles.iconAction}
+                          title="Edit"
+                          onClick={() => void openEdit(item)}
+                        >
+                          <Edit2 size={16} />
+                        </button>
                         <button
                           type="button"
                           className={styles.dangerIcon}
@@ -369,8 +583,13 @@ export default function ProjectBoqPage() {
                   <SearchableSelect
                     placeholder="Select warehouse (Optional)..."
                     searchPlaceholder="Search warehouse..."
+                    emptyText={
+                      !selectedVariantId
+                        ? 'Select an item first'
+                        : 'This item is not available in any warehouse'
+                    }
                     value={selectedWarehouseId}
-                    options={warehouses.map(w => ({ value: w.id, label: w.name, keywords: [w.name] }))}
+                    options={availableWarehouseOptions}
                     onChange={setSelectedWarehouseId}
                   />
                 </div>
@@ -400,14 +619,45 @@ export default function ProjectBoqPage() {
                       <div className={styles.stockTotal}>
                         Total Stock: <strong>{catalogMeta[selectedVariantId].stock}</strong>
                       </div>
+                      <div className={styles.stockMetrics}>
+                        <div className={styles.stockMetricRow}>
+                          <span>Promised in This Project:</span>
+                          <strong className={styles.thisProjectValue}>{promisedStock[selectedVariantId]?.thisProject || 0}</strong>
+                        </div>
+                        <div className={styles.stockMetricRow}>
+                          <span>Promised in Other Projects:</span>
+                          <strong className={styles.promisedValue}>{promisedStock[selectedVariantId]?.otherProjects || 0}</strong>
+                        </div>
+                        <div className={styles.stockMetricRow}>
+                          <span>Available Leftovers:</span>
+                          <strong className={styles.availableValue}>{Math.max((catalogMeta[selectedVariantId].stock) - ((promisedStock[selectedVariantId]?.thisProject || 0) + (promisedStock[selectedVariantId]?.otherProjects || 0)), 0)}</strong>
+                        </div>
+                      </div>
                       <div className={styles.warehouseList}>
                         {catalogMeta[selectedVariantId].stock_data && catalogMeta[selectedVariantId].stock_data!.length > 0 ? (
-                          catalogMeta[selectedVariantId].stock_data!.map((s, i) => (
-                            <div key={i} className={styles.warehouseRow}>
-                              <span>{s.warehouse_name}</span>
-                              <strong>{s.quantity}</strong>
-                            </div>
-                          ))
+                          <>
+                            <div className={styles.warehouseHeader}>Warehouse Breakdown:</div>
+                            {selectedVariantWarehouseBreakdown.map((warehouse) => (
+                              <div
+                                key={warehouse.warehouseId || warehouse.warehouseName}
+                                className={styles.warehouseRow}
+                                style={{
+                                  alignItems: 'flex-start',
+                                  background: selectedWarehouseId && warehouse.warehouseId === selectedWarehouseId ? '#f8fafc' : 'transparent',
+                                  padding: '0.35rem 0.25rem',
+                                  borderRadius: '0.35rem',
+                                }}
+                              >
+                                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.18rem' }}>
+                                  <span>{warehouse.warehouseName}</span>
+                                  <span style={{ fontSize: '0.68rem', color: '#6b7280' }}>
+                                    This: {warehouse.promisedThis} | Other: {warehouse.promisedOther} | Free: {warehouse.free}
+                                  </span>
+                                </div>
+                                <strong>{warehouse.stock}</strong>
+                              </div>
+                            ))}
+                          </>
                         ) : (
                           <div className={styles.noStock}>No stock available in any warehouse</div>
                         )}
@@ -424,6 +674,61 @@ export default function ProjectBoqPage() {
               </button>
               <button className={styles.primaryAction} disabled={isSaving} onClick={() => void addItem()}>
                 {isSaving ? 'Saving...' : 'Add'}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {editDialogOpen && editingItem ? (
+        <div className={styles.overlay} onClick={() => (isSaving ? null : setEditDialogOpen(false))}>
+          <div className={styles.dialog} onClick={(e) => e.stopPropagation()}>
+            <div className={styles.dialogHeader}>
+              <div className={styles.dialogTitle}>Edit BOQ Item</div>
+              <button type="button" className={styles.closeBtn} onClick={() => (isSaving ? null : setEditDialogOpen(false))}>
+                <X size={16} />
+              </button>
+            </div>
+
+            <div className={styles.dialogBody}>
+              <div className={styles.formGrid}>
+                <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
+                  <label className={styles.label}>Item Name</label>
+                  <div className={styles.staticField}>{editingItem.item_name}</div>
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.label}>Manufacturer</label>
+                  <div className={styles.staticField}>{editingItem.manufacturer || '-'}</div>
+                </div>
+
+                <div className={styles.field}>
+                  <label className={styles.label}>Unit</label>
+                  <div className={styles.staticField}>{editingItem.unit}</div>
+                </div>
+
+                <div className={styles.field} style={{ gridColumn: '1 / -1' }}>
+                  <label className={styles.label}>Quantity *</label>
+                  <input 
+                    className={styles.input} 
+                    value={editQty} 
+                    onChange={(e) => setEditQty(e.target.value)} 
+                    placeholder="0" 
+                    autoFocus
+                  />
+                  <div className={styles.qtyHelp}>
+                    Current: {editingItem.quantity} | Delivered: {editingItem.delivered || 0} | Balance: {Math.max((editingItem.quantity || 0) - (editingItem.delivered || 0), 0)}
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className={styles.dialogActions}>
+              <button className={styles.secondaryAction} disabled={isSaving} onClick={() => setEditDialogOpen(false)}>
+                Cancel
+              </button>
+              <button className={styles.primaryAction} disabled={isSaving} onClick={() => void updateItem()}>
+                {isSaving ? 'Saving...' : 'Update'}
               </button>
             </div>
           </div>

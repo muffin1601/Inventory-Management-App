@@ -104,6 +104,23 @@ const DELIVERY_RECEIPTS_KEY = 'ims_delivery_receipts_v1';
 const PAYMENT_SLIPS_KEY = 'ims_payment_slips_v1';
 const BOQ_ITEMS_KEY = 'ims_project_boq_items_v1';
 
+function normalizePaymentSlip(row: any): PaymentSlipRow {
+  return {
+    id: row.id,
+    slip_no: row.slip_no || row.payment_no || row.id,
+    date: row.date || row.payment_date || row.created_at?.split('T')[0] || '',
+    due_date: row.due_date || row.date || row.payment_date || '',
+    vendor_name: row.vendor_name || row.payee || '',
+    po_ref: row.po_ref || '',
+    amount: row.amount || 0,
+    payment_method: row.payment_method || 'BANK_TRANSFER',
+    ref_no: row.ref_no || '',
+    prepared_by: row.prepared_by || '',
+    status: row.status || 'ISSUED',
+    remarks: row.remarks || undefined,
+  };
+}
+
 function readLocalData<T>(key: string): T[] {
   if (typeof window === 'undefined') return [];
   const raw = window.localStorage.getItem(key);
@@ -1251,9 +1268,9 @@ export const modulesService = {
         .order('dispatch_date', { ascending: false });
 
       if (chError) {
-        if (isSchemaError(chError)) return readLocalData<ChallanRow>(CHALLANS_KEY);
+        if (isSchemaError(chError)) return [];
         console.error('Error fetching challans:', chError);
-        return readLocalData<ChallanRow>(CHALLANS_KEY);
+        return [];
       }
 
       if (!challans || challans.length === 0) return [];
@@ -1304,7 +1321,7 @@ export const modulesService = {
       }));
     } catch (error) {
       console.error('Error fetching challans:', error);
-      return readLocalData<ChallanRow>(CHALLANS_KEY);
+      return [];
     }
   },
 
@@ -1390,48 +1407,10 @@ export const modulesService = {
               console.log(`[BOQ-SYNC] Updated BOQ item ${item.name}: +${item.quantity}`);
             }
           }
-          
-          // Local Storage Sync
-          if (typeof window !== 'undefined') {
-            const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
-            if (raw) {
-              const state = JSON.parse(raw);
-              if (state[finalProjectId]) {
-                state[finalProjectId] = state[finalProjectId].map((boq: any) => {
-                  const match = items.find(i => {
-                    return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
-                  });
-                  if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };
-                  return boq;
-                });
-                window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
-              }
-            }
-          }
         } catch (e) {
           console.warn('[BOQ-SYNC] Sync warning:', e);
         }
       }
-
-      // Save to local storage as backup
-      const challanRow: ChallanRow = {
-        id: challanId,
-        challan_no: challanNo.trim(),
-        po_no: poNo?.trim() || '',
-        project_name: projectName.trim(),
-        vendor_name: vendorName?.trim() || 'Project Site',
-        dispatch_date: dispatchDate,
-        status: 'ISSUED',
-        items: items.map((item, idx) => ({
-          id: `${challanId}-${idx}`,
-          name: item.name.trim(),
-          quantity: Number(item.quantity),
-          unit: item.unit.trim()
-        }))
-      };
-
-      const existing = readLocalData<ChallanRow>(CHALLANS_KEY);
-      writeLocalData<ChallanRow>(CHALLANS_KEY, [challanRow, ...existing]);
 
       return { id: challanId, challan_no: challanNo.trim() };
     } catch (error) {
@@ -1475,10 +1454,6 @@ export const modulesService = {
 
       if (updateError) throw updateError;
 
-      // Update local cache
-      const existing = readLocalData<ChallanRow>(CHALLANS_KEY);
-      const updated = existing.map(c => c.id === challanId ? { ...c, status: newStatus as 'ISSUED' | 'DISPATCHED' | 'DELIVERED' } : c);
-      writeLocalData<ChallanRow>(CHALLANS_KEY, updated);
     } catch (error) {
       console.error('Error updating challan status:', error);
       throw error;
@@ -1524,24 +1499,6 @@ export const modulesService = {
                 .eq('id', boqItem.id);
             }
           }
-
-          // Local Storage BOQ Sync Reversal
-          if (typeof window !== 'undefined') {
-            const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
-            if (raw) {
-              const state = JSON.parse(raw);
-              if (state[challan.project_id]) {
-                state[challan.project_id] = state[challan.project_id].map((boq: any) => {
-                  const match = items.find(i => {
-                    return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
-                  });
-                  if (match) return { ...boq, delivered: Math.max(0, (Number(boq.delivered) || 0) - Number(match.quantity)) };
-                  return boq;
-                });
-                window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
-              }
-            }
-          }
         } catch (revertError) {
           console.warn('[BOQ-REVERT] Warning during quantity reversal:', revertError);
         }
@@ -1554,10 +1511,6 @@ export const modulesService = {
         .eq('id', challanId);
 
       if (deleteError) throw deleteError;
-
-      // 4. Update local challan cache
-      const existing = readLocalData<ChallanRow>(CHALLANS_KEY);
-      writeLocalData<ChallanRow>(CHALLANS_KEY, existing.filter(c => c.id !== challanId));
     } catch (error) {
       console.error('Error deleting challan:', error);
       throw error;
@@ -1565,8 +1518,7 @@ export const modulesService = {
   },
 
   async saveChallans(challans: ChallanRow[]): Promise<void> {
-    // Keep for backward compatibility but use DB when possible
-    writeLocalData<ChallanRow>(CHALLANS_KEY, challans);
+    void challans;
   },
 
   async getDeliveryReceipts(): Promise<DeliveryReceiptRow[]> {
@@ -1595,19 +1547,17 @@ export const modulesService = {
           }));
         }
 
-        if (error && isSchemaError(error)) {
-          return readLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY);
-        }
+        if (error && isSchemaError(error)) continue;
       }
-      return readLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY);
+      return [];
     } catch (error) {
       console.error('Error fetching delivery receipts:', error);
-      return readLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY);
+      return [];
     }
   },
 
   async saveDeliveryReceipts(receipts: DeliveryReceiptRow[]): Promise<void> {
-    writeLocalData<DeliveryReceiptRow>(DELIVERY_RECEIPTS_KEY, receipts);
+    void receipts;
   },
 
   async createDeliveryReceipt(
@@ -1698,24 +1648,6 @@ export const modulesService = {
                 .from('boq_items')
                 .update({ delivered: newDelivered })
                 .eq('id', boqItem.id);
-            }
-          }
-          
-          // Local Storage Sync
-          if (typeof window !== 'undefined') {
-            const raw = window.localStorage.getItem(BOQ_ITEMS_KEY);
-            if (raw) {
-              const state = JSON.parse(raw);
-              if (state[finalProjectId]) {
-                state[finalProjectId] = state[finalProjectId].map((boq: any) => {
-                  const match = items.find(i => {
-                    return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
-                  });
-                  if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };
-                  return boq;
-                });
-                window.localStorage.setItem(BOQ_ITEMS_KEY, JSON.stringify(state));
-              }
             }
           }
         } catch (e) {
@@ -1811,34 +1743,164 @@ export const modulesService = {
           .limit(100);
 
         if (!error && data) {
-          return data.map(row => ({
-            id: row.id,
-            slip_no: row.slip_no || row.payment_no || row.id,
-            date: row.date || row.payment_date || row.created_at?.split('T')[0] || '',
-            due_date: row.due_date || row.date || row.payment_date || '',
-            vendor_name: row.vendor_name || row.payee || '',
-            po_ref: row.po_ref || '',
-            amount: row.amount || 0,
-            payment_method: row.payment_method || 'BANK_TRANSFER',
-            ref_no: row.ref_no || '',
-            prepared_by: row.prepared_by || '',
-            status: row.status || 'ISSUED'
-          }));
+          return data.map(normalizePaymentSlip);
         }
 
-        if (error && isSchemaError(error)) {
-          return readLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY);
-        }
+        if (error && isSchemaError(error)) continue;
       }
-      return readLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY);
+      return [];
     } catch (error) {
       console.error('Error fetching payment slips:', error);
-      return readLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY);
+      return [];
     }
   },
 
   async savePaymentSlips(slips: PaymentSlipRow[]): Promise<void> {
-    writeLocalData<PaymentSlipRow>(PAYMENT_SLIPS_KEY, slips);
+    if (!Array.isArray(slips) || slips.length === 0) return;
+    for (const slip of slips) {
+      await this.updatePaymentSlip(slip.id, {
+        date: slip.date,
+        due_date: slip.due_date,
+        vendor_name: slip.vendor_name,
+        po_ref: slip.po_ref,
+        amount: slip.amount,
+        payment_method: slip.payment_method,
+        ref_no: slip.ref_no,
+        prepared_by: slip.prepared_by,
+        status: slip.status,
+        remarks: slip.remarks,
+      });
+    }
+  },
+
+  async createPaymentSlip(
+    slip: Partial<PaymentSlipRow>,
+    userId: string,
+  ): Promise<{ id: string; slip_no: string }> {
+    const slipNo = slip.slip_no || `PS-${Date.now().toString().slice(-6)}`;
+    const vendorName = (slip.vendor_name || '').trim();
+    if (!vendorName) throw new Error('Vendor name is required');
+
+    const finalVendorId = await ensureVendor(vendorName);
+    const payload = {
+      slip_no: slipNo,
+      date: slip.date || new Date().toISOString().split('T')[0],
+      due_date: slip.due_date || null,
+      vendor_id: finalVendorId,
+      po_ref: slip.po_ref || null,
+      amount: Number(slip.amount || 0),
+      payment_method: slip.payment_method || 'BANK_TRANSFER',
+      ref_no: slip.ref_no || null,
+      prepared_by: userId,
+      status: slip.status || 'ISSUED',
+      remarks: slip.remarks || null,
+    };
+
+    if (!payload.amount || payload.amount <= 0) {
+      throw new Error('Payment amount must be greater than zero');
+    }
+
+    if (finalVendorId) {
+      const { data, error } = await supabase
+        .from('payment_slips')
+        .insert(payload)
+        .select('*')
+        .single();
+
+      if (!error && data) {
+        return { id: data.id, slip_no: data.slip_no || slipNo };
+      }
+
+      if (error && !isSchemaError(error)) {
+        throw error;
+      }
+    }
+
+    const legacyPayload = {
+      slip_no: slipNo,
+      date: payload.date,
+      due_date: payload.due_date,
+      vendor_name: vendorName,
+      po_ref: payload.po_ref,
+      amount: payload.amount,
+      payment_method: payload.payment_method,
+      ref_no: payload.ref_no,
+      prepared_by: slip.prepared_by || userId,
+      status: payload.status,
+      remarks: payload.remarks,
+    };
+
+    const { data: legacyData, error: legacyError } = await supabase
+      .from('payments')
+      .insert(legacyPayload)
+      .select('*')
+      .single();
+
+    if (legacyError || !legacyData) throw legacyError || new Error('Failed to create payment slip');
+    return { id: legacyData.id, slip_no: legacyData.slip_no || slipNo };
+  },
+
+  async updatePaymentSlip(
+    slipId: string,
+    input: Partial<Pick<PaymentSlipRow, 'date' | 'due_date' | 'vendor_name' | 'po_ref' | 'amount' | 'payment_method' | 'ref_no' | 'prepared_by' | 'status' | 'remarks'>>,
+  ): Promise<PaymentSlipRow> {
+    const payload: Record<string, unknown> = {};
+
+    if (input.date !== undefined) payload.date = input.date;
+    if (input.due_date !== undefined) payload.due_date = input.due_date || null;
+    if (input.po_ref !== undefined) payload.po_ref = input.po_ref || null;
+    if (input.amount !== undefined) payload.amount = input.amount;
+    if (input.payment_method !== undefined) payload.payment_method = input.payment_method;
+    if (input.ref_no !== undefined) payload.ref_no = input.ref_no || null;
+    if (input.status !== undefined) payload.status = input.status;
+    if (input.remarks !== undefined) payload.remarks = input.remarks || null;
+
+    if (input.vendor_name !== undefined) {
+      const vendorId = await ensureVendor(input.vendor_name);
+      if (vendorId) payload.vendor_id = vendorId;
+      payload.vendor_name = input.vendor_name;
+    }
+
+    if (input.prepared_by !== undefined) payload.prepared_by = input.prepared_by;
+
+    const primaryPayload = { ...payload };
+    delete primaryPayload.vendor_name;
+
+    const { data, error } = await supabase
+      .from('payment_slips')
+      .update(primaryPayload)
+      .eq('id', slipId)
+      .select('*')
+      .single();
+
+    if (!error && data) {
+      const normalized = normalizePaymentSlip(data);
+      if (input.vendor_name) normalized.vendor_name = input.vendor_name;
+      return normalized;
+    }
+
+    if (error && !isSchemaError(error)) {
+      throw error;
+    }
+
+    const { data: legacyData, error: legacyError } = await supabase
+      .from('payments')
+      .update(payload)
+      .eq('id', slipId)
+      .select('*')
+      .single();
+
+    if (legacyError || !legacyData) throw legacyError || new Error('Failed to update payment slip');
+    return normalizePaymentSlip(legacyData);
+  },
+
+  async deletePaymentSlip(slipId: string, _userId: string): Promise<void> {
+    const { error } = await supabase.from('payment_slips').delete().eq('id', slipId);
+    if (!error) return;
+    if (!isSchemaError(error)) throw error;
+
+    const { error: legacyError } = await supabase.from('payments').delete().eq('id', slipId);
+    if (legacyError) throw legacyError;
   },
 
   async getInventorySnapshot(): Promise<InventorySnapshotRow[]> {

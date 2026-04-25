@@ -170,7 +170,7 @@ export default function StockPage() {
       setWarehouses(warehouseRows);
       setManufacturers(manufacturerRows.map((item: { name: string }) => item.name));
       setOrders(existingOrders);
-      setBoqItems(boqResult.items || []);
+      setBoqItems(boqResult);
       setUnits(unitRows);
       setReasons(reasonRows);
 
@@ -270,6 +270,7 @@ export default function StockPage() {
           warehouseName: '-',
           unit,
           stock: 0,
+          reserved: 0,
           promised: totalPromised,
           free: -totalPromised,
           attributes: variant.attributes,
@@ -293,6 +294,7 @@ export default function StockPage() {
         const isLastRow = index === variant.stock_data.length - 1;
         const boqOverflow = isLastRow ? remainingGlobalBoq : 0;
         
+        // Total promised = orders + BOQ allocation + overflow
         const totalPromised = orderPromised + explicitBoqPromise + globalBoqAllocated + boqOverflow;
 
         return {

@@ -1,7 +1,6 @@
 import { supabase } from '../supabase';
 import { Product, Variant } from '../../types/inventory';
 
-const UNITS_KEY = 'ims_units_v1';
 const DEFAULT_UNITS = [
   'Numbers',
   'Pcs',
@@ -16,7 +15,6 @@ const DEFAULT_UNITS = [
   'Square Meter',
   'Tons',
 ];
-const REASONS_KEY = 'ims_reason_options_v1';
 const DEFAULT_REASONS = [
   'Cycle Count',
   'Stock Correction',
@@ -30,23 +28,6 @@ const DEFAULT_REASONS = [
   'Goods Issued',
   'Warehouse Transfer',
 ];
-
-function readLocalList(key: string, fallback: string[]) {
-  if (typeof window === 'undefined') return fallback;
-  const raw = window.localStorage.getItem(key);
-  if (!raw) return fallback;
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeLocalList(key: string, value: string[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(key, JSON.stringify(value));
-}
 
 function isMissingStockMovementsEndpoint(error: unknown) {
   if (!error || typeof error !== 'object') return false;
@@ -71,10 +52,66 @@ function isMissingStockMovementsEndpoint(error: unknown) {
   );
 }
 
+function isMissingAppOptionsTable(error: unknown) {
+  if (!error || typeof error !== 'object') return false;
+
+  const candidate = error as {
+    code?: string;
+    message?: string;
+    details?: string;
+  };
+
+  const combinedMessage = `${candidate.message || ''} ${candidate.details || ''}`.toLowerCase();
+  return (
+    candidate.code === 'PGRST205' ||
+    candidate.code === '42P01' ||
+    combinedMessage.includes('app_options') ||
+    combinedMessage.includes('relation') ||
+    combinedMessage.includes('not found')
+  );
+}
+
+async function getAppOptions(type: 'UNIT' | 'REASON') {
+  const { data, error } = await supabase
+    .from('app_options')
+    .select('value')
+    .eq('type', type)
+    .order('value');
+
+  if (error) {
+    if (isMissingAppOptionsTable(error)) return [];
+    throw error;
+  }
+
+  return (data || [])
+    .map((row: { value?: string }) => String(row.value || '').trim())
+    .filter(Boolean);
+}
+
+async function createAppOption(type: 'UNIT' | 'REASON', value: string) {
+  const normalized = value.trim();
+  if (!normalized) {
+    throw new Error(`${type === 'UNIT' ? 'Unit' : 'Reason'} is required.`);
+  }
+
+  const { data, error } = await supabase
+    .from('app_options')
+    .upsert({ type, value: normalized }, { onConflict: 'type,value' })
+    .select('value')
+    .single();
+
+  if (error) {
+    if (isMissingAppOptionsTable(error)) return normalized;
+    throw error;
+  }
+
+  return String(data?.value || normalized);
+}
+
 export const inventoryService = {
   async getProducts(): Promise<any[]> {
     try {
-      // Base query
+      // Try full query with reserved column (if migration has run)
       let query = supabase
         .from('products')
         .select(`
@@ -89,15 +126,16 @@ export const inventoryService = {
           )
         `);
 
-      // Try to add deleted_at filter, but catch if it fails
+      // Try to add deleted_at filter
       const { data, error } = await query
         .is('deleted_at', null)
         .order('created_at', { ascending: false });
 
       if (error) {
-        // Fallback for missing deleted_at column
+        // Fallback for missing columns (either deleted_at or reserved)
         if (error.code === '42703') {
-           const { data: fallbackData, error: fallbackError } = await supabase
+          // Column missing - try query without reserved column
+          const { data: fallbackData, error: fallbackError } = await supabase
             .from('products')
             .select(`
               id, name, category, brand, description, created_at, updated_at,
@@ -110,10 +148,30 @@ export const inventoryService = {
                 )
               )
             `)
+            .is('deleted_at', null)
             .order('created_at', { ascending: false });
-           
-           if (fallbackError) throw fallbackError;
-           return this.processProducts(fallbackData);
+          
+          if (fallbackError) {
+            // Try without deleted_at filter as well
+            const { data: fallback2Data, error: fallback2Error } = await supabase
+              .from('products')
+              .select(`
+                id, name, category, brand, description, created_at, updated_at,
+                variants:variants(
+                  id, sku, price, attributes,
+                  inventory:inventory(
+                    id,
+                    quantity,
+                    warehouse:warehouses(id, name)
+                  )
+                )
+              `)
+              .order('created_at', { ascending: false });
+            
+            if (fallback2Error) throw fallback2Error;
+            return this.processProducts(fallback2Data);
+          }
+          return this.processProducts(fallbackData);
         }
         throw error;
       }
@@ -427,41 +485,25 @@ export const inventoryService = {
     const products = await this.getProducts();
     const catalogUnits = products.flatMap((product: any) =>
       (product.variants || [])
-        .map((variant: any) => variant.attributes?.Unit)
+        .map((variant: any) => variant.attributes?.Unit || variant.attributes?.unit || product.unit)
         .filter(Boolean),
     );
 
-    const savedUnits = readLocalList(UNITS_KEY, DEFAULT_UNITS);
-    return Array.from(new Set([...DEFAULT_UNITS, ...savedUnits, ...catalogUnits])).sort((a, b) => a.localeCompare(b));
+    const dbUnits = await getAppOptions('UNIT');
+    return Array.from(new Set([...DEFAULT_UNITS, ...dbUnits, ...catalogUnits])).sort((a, b) => a.localeCompare(b));
   },
 
   async createUnit(name: string) {
-    const normalized = name.trim();
-    if (!normalized) {
-      throw new Error('Unit name is required.');
-    }
-
-    const currentUnits = readLocalList(UNITS_KEY, DEFAULT_UNITS);
-    const nextUnits = Array.from(new Set([...currentUnits, normalized]));
-    writeLocalList(UNITS_KEY, nextUnits);
-    return normalized;
+    return createAppOption('UNIT', name);
   },
 
   async getReasons() {
-    const savedReasons = readLocalList(REASONS_KEY, DEFAULT_REASONS);
-    return Array.from(new Set([...DEFAULT_REASONS, ...savedReasons])).sort((a, b) => a.localeCompare(b));
+    const dbReasons = await getAppOptions('REASON');
+    return Array.from(new Set([...DEFAULT_REASONS, ...dbReasons])).sort((a, b) => a.localeCompare(b));
   },
 
   async createReason(name: string) {
-    const normalized = name.trim();
-    if (!normalized) {
-      throw new Error('Reason is required.');
-    }
-
-    const currentReasons = readLocalList(REASONS_KEY, DEFAULT_REASONS);
-    const nextReasons = Array.from(new Set([...currentReasons, normalized]));
-    writeLocalList(REASONS_KEY, nextReasons);
-    return normalized;
+    return createAppOption('REASON', name);
   },
 
   async recordMovement(movement: {

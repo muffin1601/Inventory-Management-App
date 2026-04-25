@@ -165,7 +165,7 @@ export default function OrdersPage() {
       setOrders(existingOrders);
       setProducts(productsData as ProductWithVariants[]);
       setVendors(mergedVendors);
-      setProjects(projectList.projects || []);
+      setProjects(projectList || []);
 
       const current = await modulesService.getCurrentUser();
       if (current) {
