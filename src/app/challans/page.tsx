@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import styles from './Challans.module.css';
-import { 
+import {
   Search, Filter, Truck, CheckCircle2, Clock,
   Eye, Trash2, FileText, Printer, AlertCircle
 } from 'lucide-react';

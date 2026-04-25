@@ -776,7 +776,6 @@ export default function ProductsPage() {
                           <span>ATTRIBUTES</span>
                           <span>WAREHOUSE</span>
                           <span>STOCK</span>
-                          <span>FREE</span>
                           <span style={{ textAlign: 'right' }}>ACTIONS</span>
                         </div>
                         {product.variants?.map((v: any) => (
@@ -790,7 +789,6 @@ export default function ProductsPage() {
                               </div>
                               <div className={styles.warehouseTag}>{v.stock_data?.[0]?.warehouse_name || '-'}</div>
                               <span className={styles.variantStockText}>{v.stock_data?.reduce((acc:any, s:any) => acc + s.quantity, 0) || 0}</span>
-                              <span className={styles.variantFreeText}>{v.stock_data?.reduce((acc:any, s:any) => acc + s.quantity, 0) || 0}</span>
                               <div className={styles.variantRowActions}>
                                 {canEditProducts && <button className={styles.miniBtn} title="Edit Option" onClick={() => handleOpenEditVariant(product, v)}>
                                   <Edit2 size={12}/>

@@ -387,7 +387,7 @@
 .variantHeader,
 .variantRow {
   display: grid;
-  grid-template-columns: 2fr 1.5fr 3fr 1.5fr 100px 100px 120px;
+  grid-template-columns: 2fr 1.5fr 3fr 1.5fr 100px 120px;
   align-items: center;
   gap: 0.85rem;
 }
@@ -408,8 +408,7 @@
   border-top: 1px solid #f8fafc;
 }
 
-.variantStockText,
-.variantFreeText {
+.variantStockText {
   font-weight: 500;
   color: var(--text-primary);
   text-align: right;
@@ -453,16 +452,13 @@
   border: 1px solid #ddd6fe;
 }
 
-.variantStockText,
-.variantFreeText {
+.variantStockText {
   font-weight: 600;
   color: var(--text-primary);
   text-align: center;
 }
 
-.variantFreeText {
-  color: #10b981;
-}
+
 
 .variantRowActions {
   display: flex;
