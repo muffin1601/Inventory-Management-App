@@ -1371,17 +1371,12 @@ export const modulesService = {
       if (finalProjectId) {
         try {
           for (const item of items) {
-            // Find in boq_items by project_id and variant_id OR item_name
-            let boqQuery = supabase
+            // Find in boq_items by project_id and item_name
+            const boqQuery = supabase
               .from('boq_items')
               .select('id, delivered')
-              .eq('project_id', finalProjectId);
-            
-            if (item.variant_id) {
-              boqQuery = boqQuery.eq('variant_id', item.variant_id);
-            } else {
-              boqQuery = boqQuery.ilike('item_name', item.name.trim());
-            }
+              .eq('project_id', finalProjectId)
+              .ilike('item_name', item.name.trim());
 
             const { data: boqItem, error: fetchError } = await boqQuery.limit(1).single();
 
@@ -1404,7 +1399,6 @@ export const modulesService = {
               if (state[finalProjectId]) {
                 state[finalProjectId] = state[finalProjectId].map((boq: any) => {
                   const match = items.find(i => {
-                    if (i.variant_id && boq.variant_id) return i.variant_id === boq.variant_id;
                     return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
                   });
                   if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };
@@ -1507,23 +1501,18 @@ export const modulesService = {
 
       const { data: items, error: itemsError } = await supabase
         .from('challan_items')
-        .select('name, quantity, variant_id')
+        .select('name, quantity')
         .eq('challan_id', challanId);
 
       // 2. Revert BOQ delivered quantities (Live Sync Reversal)
       if (challan.project_id && items && items.length > 0) {
         try {
           for (const item of items) {
-            let boqQuery = supabase
+            const boqQuery = supabase
               .from('boq_items')
               .select('id, delivered')
-              .eq('project_id', challan.project_id);
-
-            if (item.variant_id) {
-              boqQuery = boqQuery.eq('variant_id', item.variant_id);
-            } else {
-              boqQuery = boqQuery.ilike('item_name', item.name.trim());
-            }
+              .eq('project_id', challan.project_id)
+              .ilike('item_name', item.name.trim());
 
             const { data: boqItem, error: boqError } = await boqQuery.limit(1).single();
 
@@ -1544,7 +1533,6 @@ export const modulesService = {
               if (state[challan.project_id]) {
                 state[challan.project_id] = state[challan.project_id].map((boq: any) => {
                   const match = items.find(i => {
-                    if (i.variant_id && boq.variant_id) return i.variant_id === boq.variant_id;
                     return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
                   });
                   if (match) return { ...boq, delivered: Math.max(0, (Number(boq.delivered) || 0) - Number(match.quantity)) };
@@ -1696,16 +1684,11 @@ export const modulesService = {
       if (finalProjectId) {
         try {
           for (const item of items) {
-            let boqQuery = supabase
+            const boqQuery = supabase
               .from('boq_items')
               .select('id, delivered')
-              .eq('project_id', finalProjectId);
-            
-            if (item.variant_id) {
-              boqQuery = boqQuery.eq('variant_id', item.variant_id);
-            } else {
-              boqQuery = boqQuery.ilike('item_name', item.name.trim());
-            }
+              .eq('project_id', finalProjectId)
+              .ilike('item_name', item.name.trim());
 
             const { data: boqItem, error: fetchError } = await boqQuery.limit(1).single();
 
@@ -1726,7 +1709,6 @@ export const modulesService = {
               if (state[finalProjectId]) {
                 state[finalProjectId] = state[finalProjectId].map((boq: any) => {
                   const match = items.find(i => {
-                    if (i.variant_id && boq.variant_id) return i.variant_id === boq.variant_id;
                     return i.name.trim().toLowerCase() === boq.item_name.trim().toLowerCase();
                   });
                   if (match) return { ...boq, delivered: (Number(boq.delivered) || 0) + Number(match.quantity) };

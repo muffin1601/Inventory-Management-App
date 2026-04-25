@@ -451,8 +451,6 @@ export const projectsService = {
 
     if (trimmedManufacturer) payload.manufacturer = trimmedManufacturer;
     if (delivered) payload.delivered = delivered;
-    if (input.variant_id) payload.variant_id = input.variant_id;
-    if (input.warehouse_id) payload.warehouse_id = input.warehouse_id;
 
     const insert = await supabase.from(table).insert(payload).select('*').single();
 
@@ -467,8 +465,6 @@ export const projectsService = {
         };
         if (trimmedManufacturer) fallbackPayload.manufacturer = trimmedManufacturer;
         if (delivered) fallbackPayload.delivered = delivered;
-        if (input.variant_id) fallbackPayload.variant_id = input.variant_id;
-        if (input.warehouse_id) fallbackPayload.warehouse_id = input.warehouse_id;
 
         const fallbackInsert = await supabase
           .from(table)
