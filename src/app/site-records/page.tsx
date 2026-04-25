@@ -36,6 +36,7 @@ export default function SiteRecordsPage() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [orders, setOrders] = useState<OrderRow[]>([]);
   const [catalogItems, setCatalogItems] = useState<any[]>([]);
+  const [vendors, setVendors] = useState<any[]>([]);
   
   const [createReceiptOpen, setCreateReceiptOpen] = useState(false);
   const [createPaymentOpen, setCreatePaymentOpen] = useState(false);
@@ -67,13 +68,14 @@ export default function SiteRecordsPage() {
 
   useEffect(() => {
     const loadData = async () => {
-      const [projRes, orderRes, prodRes, receiptRows, slipRows, currentUser] = await Promise.all([
+      const [projRes, orderRes, prodRes, receiptRows, slipRows, currentUser, vendorRes] = await Promise.all([
         projectsService.listProjects(),
         modulesService.getOrders(),
         inventoryService.getProducts(),
         modulesService.getDeliveryReceipts(),
         modulesService.getPaymentSlips(),
         modulesService.getCurrentUser(),
+        modulesService.getVendors(),
       ]);
 
       if (currentUser) {
@@ -104,6 +106,7 @@ export default function SiteRecordsPage() {
       setCatalogItems(prodRes);
       setReceipts(receiptRows);
       setSlips(slipRows);
+      setVendors(vendorRes);
     };
     loadData();
 
@@ -606,12 +609,16 @@ export default function SiteRecordsPage() {
               )}
 
               <div className={styles.fGroup} style={{ marginTop: '0.75rem' }}>
-                <label>VENDOR NAME</label>
-                <input 
-                  className={styles.fInput}
-                  placeholder={newReceipt.type === 'STORE_DELIVERY' ? "Auto-filled from PO" : "Enter Vendor Name"}
+                <SearchableSelect
+                  label="VENDOR NAME"
+                  placeholder={newReceipt.type === 'STORE_DELIVERY' ? "Auto-filled from PO" : "Select or enter vendor..."}
                   value={newReceipt.vendor_name || ''}
-                  onChange={e => setNewReceipt({...newReceipt, vendor_name: e.target.value})}
+                  options={vendors.map(v => ({ value: v.name, label: v.name }))}
+                  onChange={val => setNewReceipt({...newReceipt, vendor_name: val})}
+                  onCreateOption={val => {
+                    setNewReceipt({...newReceipt, vendor_name: val});
+                    return val;
+                  }}
                 />
               </div>
 
@@ -712,13 +719,16 @@ export default function SiteRecordsPage() {
                   />
                 </div>
                 <div className={styles.fGroup} style={{ marginTop: '0.75rem' }}>
-                  <label>VENDOR / PAYEE NAME *</label>
-                  <input 
-                    name="vendor_name" 
-                    className={styles.fInput} 
-                    required 
-                    value={newPayment.vendor_name || ''} 
-                    onChange={e => setNewPayment({...newPayment, vendor_name: e.target.value})} 
+                  <SearchableSelect
+                    label="VENDOR / PAYEE NAME *"
+                    placeholder="Select or enter payee..."
+                    value={newPayment.vendor_name || ''}
+                    options={vendors.map(v => ({ value: v.name, label: v.name }))}
+                    onChange={val => setNewPayment({...newPayment, vendor_name: val})}
+                    onCreateOption={val => {
+                      setNewPayment({...newPayment, vendor_name: val});
+                      return val;
+                    }}
                   />
                 </div>
                 <div className={styles.grid2} style={{ marginTop: '0.75rem' }}>

@@ -23,7 +23,7 @@ function isSchemaError(error: any): boolean {
     code === 'PGRST205' || // Schema not found
     code === '42P01' ||    // Undefined table
     code === '42703' ||    // Undefined column
-    message.includes('not found') ||
+    (message.includes('not found') && code !== 'PGRST116') ||
     message.includes('does not exist') ||
     message.includes('relation')
   );
@@ -1608,7 +1608,8 @@ export const modulesService = {
             status: receipt.status || 'VERIFIED',
             remarks: receipt.remarks || null
           };
-          await supabase.from('receipts').insert(legacyReceipt);
+          const { error: legacyError } = await supabase.from('receipts').insert(legacyReceipt);
+          if (legacyError) throw legacyError;
         } else {
           throw drError;
         }
@@ -1664,66 +1665,61 @@ export const modulesService = {
 
   async deleteDeliveryReceipt(receiptId: string, userId: string): Promise<void> {
     try {
-      // 1. Get receipt details and items before deletion to revert BOQ
-      const { data: receipt, error: fetchError } = await supabase
-        .from('delivery_receipts')
-        .select('project_id, type')
-        .eq('id', receiptId)
-        .single();
+      // 1. Identify which table contains this receipt
+      const tables = ['delivery_receipts', 'receipts', 'challans'];
+      let foundTable = '';
+      let receiptData: any = null;
 
-      // Fallback for legacy table
-      if (fetchError || !receipt) {
-        const { data: legacy, error: legacyError } = await supabase
-          .from('receipts')
+      for (const table of tables) {
+        const { data, error } = await supabase
+          .from(table)
           .select('*')
           .eq('id', receiptId)
-          .single();
+          .maybeSingle();
         
-        if (legacyError || !legacy) throw new Error('Receipt not found');
-        
-        // Resolve project ID if possible
-        const pid = legacy.project_id || await findProjectIdByName(legacy.project_name);
-        
-        // Legacy receipts might not have separate items, so we can't easily revert quantities
-        // unless we have them in the row.
-      } else {
-        const { data: items, error: itemsError } = await supabase
+        if (!error && data) {
+          foundTable = table;
+          receiptData = data;
+          break;
+        }
+      }
+
+      if (!foundTable || !receiptData) {
+        throw new Error('Receipt not found in any storage table');
+      }
+
+      // 2. Revert BOQ delivered quantities if we have items
+      // For 'delivery_receipts', we check the items table
+      if (foundTable === 'delivery_receipts') {
+        const { data: items } = await supabase
           .from('delivery_receipt_items')
           .select('variant_id, quantity')
           .eq('receipt_id', receiptId);
 
-        // 2. Revert BOQ delivered quantities
-        if (receipt.project_id && items && items.length > 0) {
-           for (const item of items) {
-             const { data: boqItem, error: boqError } = await supabase
-               .from('boq_items')
-               .select('id, delivered')
-               .eq('project_id', receipt.project_id)
-               .eq('variant_id', item.variant_id)
-               .limit(1)
-               .single();
+        if (receiptData.project_id && items && items.length > 0) {
+          for (const item of items) {
+            const { data: boqItem } = await supabase
+              .from('boq_items')
+              .select('id, delivered')
+              .eq('project_id', receiptData.project_id)
+              .eq('variant_id', item.variant_id)
+              .maybeSingle();
 
-             if (!boqError && boqItem) {
-               const newDelivered = Math.max(0, (Number(boqItem.delivered) || 0) - Number(item.quantity));
-               await supabase
-                 .from('boq_items')
-                 .update({ delivered: newDelivered })
-                 .eq('id', boqItem.id);
-             }
-           }
+            if (boqItem) {
+              const newDelivered = Math.max(0, (Number(boqItem.delivered) || 0) - Number(item.quantity));
+              await supabase.from('boq_items').update({ delivered: newDelivered }).eq('id', boqItem.id);
+            }
+          }
         }
       }
 
-      // 3. Delete receipt
-      const { error: deleteError } = await supabase
-        .from('delivery_receipts')
-        .delete()
-        .eq('id', receiptId);
+      // 3. Final Deletion from the identified table
+      const { error: deleteError } = await supabase.from(foundTable).delete().eq('id', receiptId);
+      if (deleteError) throw deleteError;
 
-      if (deleteError && isSchemaError(deleteError)) {
-        await supabase.from('receipts').delete().eq('id', receiptId);
-      } else if (deleteError) {
-        throw deleteError;
+      // 4. Also clean up items if it was the main table
+      if (foundTable === 'delivery_receipts') {
+        await supabase.from('delivery_receipt_items').delete().eq('receipt_id', receiptId);
       }
 
     } catch (error) {
@@ -1988,6 +1984,20 @@ export const modulesService = {
     } catch (error) {
       console.error('Error adding movement:', error);
       throw error;
+    }
+  },
+
+  async getVendors(): Promise<any[]> {
+    try {
+      const { data, error } = await supabase.from('vendors').select('*').order('name');
+      if (error) {
+        if (isSchemaError(error)) return [];
+        throw error;
+      }
+      return data || [];
+    } catch (error) {
+      console.error('Error fetching vendors:', error);
+      return [];
     }
   },
 };
