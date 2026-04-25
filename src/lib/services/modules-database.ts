@@ -1507,7 +1507,7 @@ export const modulesService = {
 
       const { data: items, error: itemsError } = await supabase
         .from('challan_items')
-        .select('name, quantity')
+        .select('name, quantity, variant_id')
         .eq('challan_id', challanId);
 
       // 2. Revert BOQ delivered quantities (Live Sync Reversal)

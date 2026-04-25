@@ -62,6 +62,8 @@ export const modulesService = {
   deleteChallan: dbService.deleteChallan.bind(dbService),
   getDeliveryReceipts: dbService.getDeliveryReceipts.bind(dbService),
   saveDeliveryReceipts: dbService.saveDeliveryReceipts.bind(dbService),
+  createDeliveryReceipt: dbService.createDeliveryReceipt.bind(dbService),
+  deleteDeliveryReceipt: dbService.deleteDeliveryReceipt.bind(dbService),
   getPaymentSlips: dbService.getPaymentSlips.bind(dbService),
   savePaymentSlips: dbService.savePaymentSlips.bind(dbService),
 
