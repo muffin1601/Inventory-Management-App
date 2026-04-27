@@ -124,10 +124,10 @@ export default function OrdersPage() {
       ]);
 
       const vendorSelects = [
-        { select: 'id, name, delivery_address, payment_terms', order: 'name' },
-        { select: 'id, name, city, payment_terms', order: 'name' },
-        { select: 'id, name, delivery_address', order: 'name' },
-        { select: 'id, name, city', order: 'name' },
+        { select: 'id, name, address, payment_terms', order: 'name' },
+        { select: 'id, name, address, payment_terms', order: 'name' },
+        { select: 'id, name, address', order: 'name' },
+        { select: 'id, name, address', order: 'name' },
         { select: 'id, name, payment_terms', order: 'name' },
         { select: 'id, name', order: 'name' },
         { select: '*', order: 'name' },

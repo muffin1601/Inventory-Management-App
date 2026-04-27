@@ -132,11 +132,9 @@ function normalizeVendor(row: Record<string, unknown>): VendorRecord {
         ? row.delivery_address
         : typeof row.address === "string"
           ? row.address
-          : typeof row.city === "string"
-            ? row.city
-            : "",
+          : "",
     payment_terms: typeof row.payment_terms === "string" ? row.payment_terms : "",
-    status: typeof row.status === "string" ? row.status : "ACTIVE",
+    status: typeof row.is_active === "boolean" ? (row.is_active ? "ACTIVE" : "INACTIVE") : (typeof row.status === "string" ? row.status : "ACTIVE"),
   };
 }
 
@@ -160,10 +158,10 @@ function isMissingColumnError(error: unknown) {
 
 async function loadVendors() {
   const vendorSelects = [
-    { select: "id, name, status, contact_person, phone, email, delivery_address, payment_terms", order: "name" },
-    { select: "id, name, status, phone, email, delivery_address, payment_terms", order: "name" },
-    { select: "id, name, status, city, payment_terms", order: "name" },
-    { select: "id, name, status", order: "name" },
+    { select: "id, name, is_active, contact_person, phone, email, address, payment_terms", order: "name" },
+    { select: "id, name, is_active, phone, email, address, payment_terms", order: "name" },
+    { select: "id, name, is_active, address, payment_terms", order: "name" },
+    { select: "id, name, is_active", order: "name" },
     { select: "*", order: "name" },
   ];
 
