@@ -368,7 +368,7 @@ export const modulesService = {
           .select('*')
           .eq('id', data.user.id)
           .limit(1);
-        
+
         profiles = simpleProfiles;
         profileError = simpleError;
       }
@@ -493,7 +493,7 @@ export const modulesService = {
 
   async getCurrentUser(): Promise<UserAccessRow | null> {
     const now = Date.now();
-    
+
     // 1. Memory Cache (30s for better stability)
     if (this._currentUserCache && now - this._currentUserCacheAt < 30000) {
       return this._currentUserCache;
@@ -513,23 +513,23 @@ export const modulesService = {
           if (parsed && (now - parsed._cachedAt < 86400000)) { // 24 hour cache
             this._currentUserCache = parsed;
             this._currentUserCacheAt = parsed._cachedAt;
-            
+
             // Still trigger a background refresh if it's older than 5 mins
             if (now - parsed._cachedAt > 300000) {
-               this._currentUserPromise = (async () => {
-                 try {
-                   const fresh = await this._fetchFreshUser();
-                   if (fresh) {
-                     this._currentUserCache = fresh;
-                     this._currentUserCacheAt = Date.now();
-                   }
-                   return fresh;
-                 } finally {
-                   this._currentUserPromise = null;
-                 }
-               })();
+              this._currentUserPromise = (async () => {
+                try {
+                  const fresh = await this._fetchFreshUser();
+                  if (fresh) {
+                    this._currentUserCache = fresh;
+                    this._currentUserCacheAt = Date.now();
+                  }
+                  return fresh;
+                } finally {
+                  this._currentUserPromise = null;
+                }
+              })();
             }
-            
+
             return this._currentUserCache;
           }
         } catch (e) {
@@ -548,9 +548,9 @@ export const modulesService = {
       try {
         // Use getSession first as it's faster than getUser
         const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-        
+
         let user = session?.user || null;
-        
+
         if (!user && !sessionError) {
           // If no session, try getUser just in case
           const { data: { user: authUser } } = await supabase.auth.getUser();
@@ -570,7 +570,7 @@ export const modulesService = {
     try {
       let user = null;
       let retries = 3;
-      
+
       while (retries > 0) {
         user = await fetchWithLockMitigation();
         if (user) break;
@@ -584,10 +584,10 @@ export const modulesService = {
         return null;
       }
 
-        // Try fetching profile with roles join
-        let { data: profiles, error: profileError } = await supabase
-          .from('user_profiles')
-          .select(`
+      // Try fetching profile with roles join
+      let { data: profiles, error: profileError } = await supabase
+        .from('user_profiles')
+        .select(`
             *,
             roles:role_id (
               id,
@@ -595,65 +595,65 @@ export const modulesService = {
               permission_keys
             )
           `)
+        .eq('id', user.id)
+        .limit(1);
+
+      // If join fails (e.g. 403 on roles table), retry without join
+      if (profileError && (profileError.code === '403' || (profileError as any).status === 403)) {
+        console.warn('[Auth] Role join failed (403), fetching profile without join');
+        const { data: simpleProfiles, error: simpleError } = await supabase
+          .from('user_profiles')
+          .select('*')
           .eq('id', user.id)
           .limit(1);
 
-        // If join fails (e.g. 403 on roles table), retry without join
-        if (profileError && (profileError.code === '403' || (profileError as any).status === 403)) {
-          console.warn('[Auth] Role join failed (403), fetching profile without join');
-          const { data: simpleProfiles, error: simpleError } = await supabase
-            .from('user_profiles')
-            .select('*')
-            .eq('id', user.id)
-            .limit(1);
-          
-          profiles = simpleProfiles;
-          profileError = simpleError;
-        }
+        profiles = simpleProfiles;
+        profileError = simpleError;
+      }
 
-        if (profileError || !profiles || profiles.length === 0) {
-          if (profileError) console.error('Profile fetch error:', profileError);
-          this._currentUserCache = null;
-          this._currentUserCacheAt = Date.now();
-          return null;
-        }
-
-        const profile = profiles[0];
-        const currentUser = {
-          id: profile.id,
-          full_name: profile.full_name,
-          email: profile.email,
-          role_id: profile.role_id,
-          role_name: resolveRoleName(profile.role_id, profile.roles),
-          status: profile.status,
-          custom_permission_keys: profile.custom_permission_keys || [],
-          revoked_permission_keys: profile.revoked_permission_keys || [],
-          temporary_password: profile.temporary_password,
-          last_active_at: profile.last_active_at,
-        } as UserAccessRow;
-
-        this._currentUserCache = currentUser;
-        this._currentUserCacheAt = Date.now();
-
-        // Update LocalStorage cache
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('ims_user_cache_v1', JSON.stringify({
-            ...currentUser,
-            _cachedAt: this._currentUserCacheAt
-          }));
-        }
-
-        return currentUser;
-      } catch (error) {
-        if (!isAuthLockRaceError(error)) {
-          console.error('Error getting current user:', error);
-        }
+      if (profileError || !profiles || profiles.length === 0) {
+        if (profileError) console.error('Profile fetch error:', profileError);
         this._currentUserCache = null;
         this._currentUserCacheAt = Date.now();
         return null;
-      } finally {
-        this._currentUserPromise = null;
       }
+
+      const profile = profiles[0];
+      const currentUser = {
+        id: profile.id,
+        full_name: profile.full_name,
+        email: profile.email,
+        role_id: profile.role_id,
+        role_name: resolveRoleName(profile.role_id, profile.roles),
+        status: profile.status,
+        custom_permission_keys: profile.custom_permission_keys || [],
+        revoked_permission_keys: profile.revoked_permission_keys || [],
+        temporary_password: profile.temporary_password,
+        last_active_at: profile.last_active_at,
+      } as UserAccessRow;
+
+      this._currentUserCache = currentUser;
+      this._currentUserCacheAt = Date.now();
+
+      // Update LocalStorage cache
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('ims_user_cache_v1', JSON.stringify({
+          ...currentUser,
+          _cachedAt: this._currentUserCacheAt
+        }));
+      }
+
+      return currentUser;
+    } catch (error) {
+      if (!isAuthLockRaceError(error)) {
+        console.error('Error getting current user:', error);
+      }
+      this._currentUserCache = null;
+      this._currentUserCacheAt = Date.now();
+      return null;
+    } finally {
+      this._currentUserPromise = null;
+    }
   },
 
   hasActiveSession(): boolean {
@@ -1242,7 +1242,7 @@ export const modulesService = {
       let dbStatus = status.toLowerCase();
       // Support both formats for backward compatibility
       if (dbStatus === 'pending') dbStatus = 'pending_approval';
-      
+
       // Validate status is one of allowed values
       if (!['pending_approval', 'approved', 'cancelled'].includes(dbStatus)) {
         throw new Error(`Invalid purchase order status: ${status}`);
@@ -1403,7 +1403,7 @@ export const modulesService = {
                 .from('boq_items')
                 .update({ delivered: newDelivered })
                 .eq('id', boqItem.id);
-              
+
               console.log(`[BOQ-SYNC] Updated BOQ item ${item.name}: +${item.quantity}`);
             }
           }
@@ -1569,12 +1569,12 @@ export const modulesService = {
       const receiptNo = receipt.receipt_no || `DR-${Date.now().toString().slice(-6)}`;
       const projectName = receipt.project_name || '';
       const vendorName = receipt.vendor_name || '';
-      
+
       const finalProjectId = await findProjectIdByName(projectName);
       const finalVendorId = vendorName ? await ensureVendor(vendorName) : null;
-      
+
       const receiptId = crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).substr(2, 9);
-      
+
       const receiptToInsert: any = {
         id: receiptId,
         receipt_no: receiptNo,
@@ -1676,7 +1676,7 @@ export const modulesService = {
           .select('*')
           .eq('id', receiptId)
           .maybeSingle();
-        
+
         if (!error && data) {
           foundTable = table;
           receiptData = data;
@@ -1904,7 +1904,7 @@ export const modulesService = {
       const { data: invRows, error: invError } = await supabase
         .from('inventory')
         .select('quantity, variant_id, warehouse_id');
-      
+
       if (invError || !invRows) return [];
 
       const variantIds = Array.from(new Set(invRows.map((r: any) => r.variant_id).filter(Boolean)));
@@ -1976,7 +1976,7 @@ export const modulesService = {
 
       if (error || !data) {
         if (isSchemaError(error)) {
-           return { id: 'schema_missing', created_at: new Date().toISOString(), ...input } as StockMovementRow;
+          return { id: 'schema_missing', created_at: new Date().toISOString(), ...input } as StockMovementRow;
         }
         throw error || new Error('Failed to add movement');
       }

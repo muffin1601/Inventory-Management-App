@@ -21,7 +21,8 @@ function generateChallanNumber(existingCount: number): string {
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');
   const sequence = String(existingCount + 1).padStart(4, '0');
-  return `CH-${year}-${month}-${sequence}`;
+  const random = Math.random().toString(36).substring(2, 5).toUpperCase();
+  return `CH-${year}-${month}-${sequence}-${random}`;
 }
 
 export default function ChallansPage() {
@@ -55,10 +56,10 @@ export default function ChallansPage() {
           projectsService.listProjects(),
           modulesService.getChallans()
         ]);
-        
+
         setProjects(projRes);
         setChallans(challansRes);
-        
+
       } catch (error) {
         console.error('Error loading data:', error);
         showToast('Failed to load challans', 'error');
@@ -78,7 +79,7 @@ export default function ChallansPage() {
     setLoadingBoq(true);
     try {
       const items = await projectsService.listBoqItems(project.id);
-      
+
       // Use live delivered quantity from database
       const processedItems = items.map((boq) => {
         return {
@@ -101,7 +102,7 @@ export default function ChallansPage() {
   const updateDispatchQty = (index: number, val: string) => {
     const qty = parseFloat(val) || 0;
     const item = dispatchItems[index];
-    
+
     if (qty > item.balance) {
       showToast(`Cannot exceed balance of ${item.balance} ${item.unit}`, 'error');
       return;
@@ -141,7 +142,8 @@ export default function ChallansPage() {
         .map(i => ({
           name: i.name,
           quantity: i.dispatchQty,
-          unit: i.unit
+          unit: i.unit,
+          boq_item_id: i.id
         }));
 
       if (itemsToDispatch.length === 0) {
@@ -156,7 +158,7 @@ export default function ChallansPage() {
 
       // Resolve IDs for the service
       const project = projects.find(p => p.name === newChallan.project_name);
-      
+
       // Create challan in database
       const result = await modulesService.createChallan(
         challanNo,
@@ -270,13 +272,13 @@ export default function ChallansPage() {
   };
 
   const filteredChallans = challans.filter(c => {
-    const matchesSearch = 
+    const matchesSearch =
       c.challan_no.toLowerCase().includes(search.toLowerCase()) ||
       c.project_name.toLowerCase().includes(search.toLowerCase()) ||
       c.vendor_name.toLowerCase().includes(search.toLowerCase());
-    
+
     const matchesStatus = statusFilter === 'ALL' || c.status === statusFilter;
-    
+
     return matchesSearch && matchesStatus;
   });
 
@@ -298,8 +300,8 @@ export default function ChallansPage() {
           <h1 className={styles.title}>Dispatch Challans</h1>
           <p className={styles.subtitle}>Manage material dispatches, track delivery status, and print challan records.</p>
         </div>
-        <button 
-          className={styles.primaryAction} 
+        <button
+          className={styles.primaryAction}
           onClick={() => setCreateOpen(true)}
           disabled={isLoading || isSaving}
         >
@@ -333,9 +335,9 @@ export default function ChallansPage() {
         <div className={styles.toolbar}>
           <div className={styles.searchBox}>
             <Search size={18} className={styles.searchIcon} />
-            <input 
-              type="text" 
-              placeholder="Search by Challan, Project or Vendor..." 
+            <input
+              type="text"
+              placeholder="Search by Challan, Project or Vendor..."
               className={styles.searchInput}
               value={search}
               onChange={(e) => setSearch(e.target.value)}
@@ -343,7 +345,7 @@ export default function ChallansPage() {
             />
           </div>
           <div className={styles.filters}>
-            <select 
+            <select
               className={styles.select}
               value={statusFilter}
               onChange={(e) => {
@@ -402,20 +404,19 @@ export default function ChallansPage() {
                       </td>
                       <td>{challan.dispatch_date}</td>
                       <td>
-                        <span className={`${styles.statusBadge} ${
-                          challan.status === 'DELIVERED' ? styles.statusDelivered : 
-                          challan.status === 'DISPATCHED' ? styles.statusTransit : styles.statusPending
-                        }`}>
-                          {challan.status === 'DELIVERED' ? <CheckCircle2 size={12} /> : 
-                           challan.status === 'DISPATCHED' ? <Truck size={12} /> : <Clock size={12} />}
+                        <span className={`${styles.statusBadge} ${challan.status === 'DELIVERED' ? styles.statusDelivered :
+                            challan.status === 'DISPATCHED' ? styles.statusTransit : styles.statusPending
+                          }`}>
+                          {challan.status === 'DELIVERED' ? <CheckCircle2 size={12} /> :
+                            challan.status === 'DISPATCHED' ? <Truck size={12} /> : <Clock size={12} />}
                           {challan.status}
                         </span>
                       </td>
                       <td>
                         <div style={{ display: 'flex', gap: '0.4rem', alignItems: 'center', justifyContent: 'flex-end' }}>
                           {challan.status === 'ISSUED' && (
-                            <button 
-                              className={styles.primaryAction} 
+                            <button
+                              className={styles.primaryAction}
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.65rem', whiteSpace: 'nowrap' }}
                               onClick={() => updateStatus(challan.id, 'DISPATCHED', challan.challan_no)}
                               disabled={isSaving}
@@ -424,8 +425,8 @@ export default function ChallansPage() {
                             </button>
                           )}
                           {challan.status === 'DISPATCHED' && (
-                            <button 
-                              className={styles.primaryAction} 
+                            <button
+                              className={styles.primaryAction}
                               style={{ padding: '0.25rem 0.5rem', fontSize: '0.65rem', whiteSpace: 'nowrap', background: 'var(--accent-green)' }}
                               onClick={() => updateStatus(challan.id, 'DELIVERED', challan.challan_no)}
                               disabled={isSaving}
@@ -433,10 +434,10 @@ export default function ChallansPage() {
                               <CheckCircle2 size={12} /> Mark Delivered
                             </button>
                           )}
-                          
-                          <button 
-                            className={styles.actionBtn} 
-                            title="View Challan" 
+
+                          <button
+                            className={styles.actionBtn}
+                            title="View Challan"
                             aria-label={`View ${challan.challan_no}`}
                             onClick={() => setViewingChallan(challan)}
                             disabled={isSaving}
@@ -444,9 +445,9 @@ export default function ChallansPage() {
                             <Eye size={16} />
                             <span>View</span>
                           </button>
-                          
-                          <button 
-                            className={styles.actionBtn} 
+
+                          <button
+                            className={styles.actionBtn}
                             title="Print Challan"
                             aria-label={`Print ${challan.challan_no}`}
                             onClick={() => {
@@ -458,10 +459,10 @@ export default function ChallansPage() {
                             <Printer size={16} />
                             <span>Print</span>
                           </button>
-                          
-                          <button 
-                            className={styles.actionBtn} 
-                            style={{ color: 'var(--text-secondary)' }} 
+
+                          <button
+                            className={styles.actionBtn}
+                            style={{ color: 'var(--text-secondary)' }}
                             title="Delete Challan"
                             aria-label={`Delete ${challan.challan_no}`}
                             onClick={() => deleteChallan(challan.id, challan.challan_no)}
@@ -478,7 +479,7 @@ export default function ChallansPage() {
               </tbody>
             </table>
 
-            <TablePagination 
+            <TablePagination
               page={page}
               pageSize={pageSize}
               totalItems={filteredChallans.length}
@@ -506,7 +507,7 @@ export default function ChallansPage() {
               </div>
               <div className={styles.fieldGroup} style={{ marginBottom: '1.5rem' }}>
                 <label className={styles.fieldLabel}>Select Project *</label>
-                <select 
+                <select
                   className={styles.select}
                   style={{ width: '100%' }}
                   onChange={(e) => handleProjectSelect(e.target.value)}
@@ -577,28 +578,28 @@ export default function ChallansPage() {
                       <span style={{ fontWeight: 600 }}>{item.name}</span>
                       <span style={{ textAlign: 'center' }}>{item.quantity}</span>
                       <span style={{ textAlign: 'center', color: 'var(--accent-green)' }}>{item.delivered}</span>
-                      <span 
-                        style={{ 
-                          textAlign: 'center', 
-                          color: 'var(--accent-amber)', 
-                          fontWeight: 700, 
+                      <span
+                        style={{
+                          textAlign: 'center',
+                          color: 'var(--accent-amber)',
+                          fontWeight: 700,
                           cursor: 'pointer',
-                          textDecoration: 'underline dotted' 
+                          textDecoration: 'underline dotted'
                         }}
                         title="Click to dispatch entire balance"
                         onClick={() => updateDispatchQty(idx, item.balance.toString())}
                       >
                         {item.balance}
                       </span>
-                      <input 
-                        className={styles.input} 
-                        style={{ 
-                          padding: '0.25rem', 
-                          textAlign: 'right', 
+                      <input
+                        className={styles.input}
+                        style={{
+                          padding: '0.25rem',
+                          textAlign: 'right',
                           fontWeight: 800,
                           backgroundColor: '#f1f5f9'
-                        }} 
-                        type="number" 
+                        }}
+                        type="number"
                         value={item.dispatchQty}
                         max={item.balance}
                         onChange={(e) => updateDispatchQty(idx, e.target.value)}
@@ -613,23 +614,23 @@ export default function ChallansPage() {
               <div style={{ marginRight: 'auto', color: 'var(--text-muted)', fontSize: '0.8rem' }}>
                 Step 4: Review the quantities, then generate the challan.
               </div>
-              <button 
-                className={styles.actionBtn} 
+              <button
+                className={styles.actionBtn}
                 onClick={() => setCreateOpen(false)}
                 disabled={isSaving}
               >
                 Cancel
               </button>
-              <button 
-                className={styles.primaryAction} 
+              <button
+                className={styles.primaryAction}
                 onClick={createChallan}
                 disabled={isSaving || loadingBoq || dispatchItems.length === 0}
               >
                 {isSaving ? 'Creating...' : 'Generate Challan & Dispatch'}
               </button>
             </div>
-            </div>
           </div>
+        </div>
       )}
 
       {/* View Challan Modal */}
@@ -669,11 +670,11 @@ export default function ChallansPage() {
                 <div className={styles.fieldLabel}>Update Status</div>
                 <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                   {(['ISSUED', 'DISPATCHED', 'DELIVERED'] as const).map(s => (
-                    <button 
-                      key={s} 
-                      className={styles.primaryAction} 
-                      style={{ 
-                        flex: 1, 
+                    <button
+                      key={s}
+                      className={styles.primaryAction}
+                      style={{
+                        flex: 1,
                         background: viewingChallan.status === s ? '#1e293b' : '#f1f5f9',
                         color: viewingChallan.status === s ? 'white' : '#475569',
                         fontSize: '0.65rem',
@@ -693,8 +694,8 @@ export default function ChallansPage() {
               <button className={styles.actionBtn} onClick={() => setViewingChallan(null)} disabled={isSaving}>
                 Close
               </button>
-              <button 
-                className={styles.primaryAction} 
+              <button
+                className={styles.primaryAction}
                 onClick={() => {
                   const originalTitle = document.title;
                   document.title = `Delivery_Challan_${viewingChallan.challan_no}`;
