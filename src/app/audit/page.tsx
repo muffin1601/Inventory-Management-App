@@ -277,32 +277,7 @@ export default function AuditPage() {
 
   return (
     <div className={styles.container}>
-      <div style={{
-        position: 'absolute',
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
-        background: 'rgba(255, 255, 255, 0.8)',
-        backdropFilter: 'blur(4px)',
-        zIndex: 100,
-        display: 'flex',
-        flexDirection: 'column',
-        alignItems: 'center',
-        justifyContent: 'center',
-        textAlign: 'center',
-        padding: '2rem'
-      }}>
-        <History size={64} color="#64748b" style={{ marginBottom: '1.5rem' }} />
-        <h2 style={{ fontSize: '2rem', fontWeight: 600, color: '#1e293b', marginBottom: '1rem' }}>Audit Trail: Coming Soon</h2>
-        <p style={{ maxWidth: '500px', color: '#64748b', fontSize: '1.125rem', lineHeight: 1.6 }}>
-          We are currently preparing the professional audit logging system. 
-          This module will be activated in a future update to provide comprehensive 
-          activity tracking and security monitoring.
-        </p>
-      </div>
-
-      <div className={styles.header} style={{ opacity: 0.3, pointerEvents: 'none' }}>
+      <div className={styles.header}>
         <div>
           <h1 className={styles.title}>Audit Trail</h1>
           <p className={styles.subtitle}>

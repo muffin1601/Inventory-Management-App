@@ -17,6 +17,7 @@ import {
   Shield,
   ArrowRightLeft,
   Truck,
+  History,
   PanelLeftClose,
   PanelLeftOpen,
 } from 'lucide-react';
@@ -69,6 +70,7 @@ const NAV_GROUPS: NavGroup[] = [
     label: 'Reports & Admin',
     items: [
       { name: 'Reports & Export', path: '/reports', icon: <UploadCloud size={18} strokeWidth={1.5} color="currentColor" /> },
+      { name: 'Audit Trail', path: '/audit', icon: <History size={18} strokeWidth={1.5} color="currentColor" /> },
       { name: 'User Management', path: '/users', icon: <Shield size={18} strokeWidth={1.5} color="currentColor" /> },
     ],
   },

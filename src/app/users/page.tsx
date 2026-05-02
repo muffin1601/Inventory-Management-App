@@ -82,11 +82,11 @@ export default function UsersPage() {
   const [pageSize, setPageSize] = React.useState(10);
 
   const [createUserOpen, setCreateUserOpen] = React.useState(false);
+  const [newRoleOpen, setNewRoleOpen] = React.useState(false);
   const [showPassword, setShowPassword] = React.useState(false);
   const [editUserModal, setEditUserModal] = React.useState<UserAccessRow | null>(null);
   const [passwordModal, setPasswordModal] = React.useState<UserAccessRow | null>(null);
   const [userPermissionEditor, setUserPermissionEditor] = React.useState<UserAccessRow | null>(null);
-  const [, setNewRoleOpen] = React.useState(false);
 
   const [userForm, setUserForm] = React.useState<UserFormState>({
     full_name: '',
@@ -206,12 +206,26 @@ export default function UsersPage() {
     }
 
     try {
-      await modulesService.createUser({
+      const createdUser = await modulesService.createUser({
         full_name: userForm.full_name.trim(),
         email: userForm.email.trim().toLowerCase(),
         temporary_password: userForm.temporary_password.trim(),
         role_id: userForm.role_id,
       });
+      
+      // Log audit trail
+      const currentUser = await modulesService.getCurrentUser();
+      modulesService.addAudit({
+        action: 'User Created',
+        entity_type: 'user',
+        entity_id: createdUser.id,
+        entity_name: userForm.full_name.trim(),
+        reason: 'New user invited',
+        performed_by: currentUser?.id,
+        performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
+        details: `Email: ${userForm.email.trim().toLowerCase()}, Role: ${roles.find(r => r.id === userForm.role_id)?.name || 'Unknown'}`,
+      }).catch(err => console.warn('Audit log failed:', err));
+      
       await syncData();
       setCreateUserOpen(false);
       showToast('User created successfully.', 'success');
@@ -229,6 +243,21 @@ export default function UsersPage() {
 
     try {
       await modulesService.updateUserDetails(editUserModal.id, editForm);
+      
+      // Log audit trail
+      const currentUser = await modulesService.getCurrentUser();
+      const roleChanged = editForm.role_id !== editUserModal.role_id;
+      modulesService.addAudit({
+        action: 'User Updated',
+        entity_type: 'user',
+        entity_id: editUserModal.id,
+        entity_name: editForm.full_name,
+        reason: 'User profile updated',
+        performed_by: currentUser?.id,
+        performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
+        details: `Email: ${editForm.email}${roleChanged ? `, Role changed from ${editUserModal.role_name} to ${roles.find(r => r.id === editForm.role_id)?.name || 'Unknown'}` : ''}`,
+      }).catch(err => console.warn('Audit log failed:', err));
+      
       await syncData();
       setEditUserModal(null);
       showToast('User details updated.', 'success');
@@ -250,6 +279,20 @@ export default function UsersPage() {
 
     try {
       await modulesService.changeUserPassword(passwordModal.id, passwordForm.password);
+      
+      // Log audit trail
+      const currentUser = await modulesService.getCurrentUser();
+      modulesService.addAudit({
+        action: 'Password Changed',
+        entity_type: 'user',
+        entity_id: passwordModal.id,
+        entity_name: passwordModal.full_name,
+        reason: 'Password reset by admin',
+        performed_by: currentUser?.id,
+        performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
+        details: `Password changed for user ${passwordModal.email}`,
+      }).catch(err => console.warn('Audit log failed:', err));
+      
       showToast('Password changed successfully.', 'success');
       setPasswordModal(null);
       setPasswordForm({ password: '', confirmPassword: '' });
@@ -290,6 +333,26 @@ export default function UsersPage() {
       showToast('Role permissions updated.', 'success');
     } catch {
       showToast('Failed to update role.', 'error');
+    }
+  }
+
+  async function createRole() {
+    if (!roleForm.name.trim()) {
+      showToast('Please enter a role name.', 'error');
+      return;
+    }
+
+    try {
+      await modulesService.createRole({
+        name: roleForm.name.trim(),
+        permission_keys: roleForm.permission_keys,
+      });
+      await syncData();
+      setNewRoleOpen(false);
+      setRoleForm({ name: '', permission_keys: [] });
+      showToast('Role created successfully.', 'success');
+    } catch (error: any) {
+      showToast(error.message || 'Failed to create role.', 'error');
     }
   }
 
@@ -609,6 +672,42 @@ export default function UsersPage() {
                 ))}
               </div>
             </div>
+          </div>
+        </div>
+      )}
+
+      {newRoleOpen && (
+        <div className={styles.overlay} onClick={() => setNewRoleOpen(false)}>
+          <div className={styles.modalWide} onClick={e => e.stopPropagation()}>
+            <div className={styles.modalHeader}><h2 className={styles.modalTitle}>Create New Role</h2><button onClick={() => setNewRoleOpen(false)}><X size={18} /></button></div>
+            <div className={styles.modalBody}>
+              <div className={styles.roleNameBox}>
+                <label className={styles.fieldLabel}>Role Name</label>
+                <input className={styles.textInput} value={roleForm.name} onChange={e => setRoleForm({ ...roleForm, name: e.target.value })} placeholder="e.g., Store Manager" />
+              </div>
+              <div className={styles.permissionGrid}>
+                {Object.entries(permissionGroups).map(([module, group]) => (
+                  <div key={module} className={styles.permissionCard}>
+                    <div className={styles.permissionCardTitle}>{module}</div>
+                    <div className={styles.permissionList}>
+                      {group.map(p => (
+                        <label key={p.key} className={styles.permissionItem}>
+                          <input type="checkbox" checked={roleForm.permission_keys.includes(p.key)} onChange={() => {
+                            const keys = roleForm.permission_keys.includes(p.key) ? roleForm.permission_keys.filter(k => k !== p.key) : [...roleForm.permission_keys, p.key];
+                            setRoleForm({ ...roleForm, permission_keys: keys });
+                          }} />
+                          <div>
+                            <div className={styles.permissionLabel}>{p.label}</div>
+                            <div className={styles.permissionHint}>{p.description}</div>
+                          </div>
+                        </label>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+            <div className={styles.modalActions}><button className={styles.secondaryAction} onClick={() => setNewRoleOpen(false)}>Cancel</button><button className={styles.primaryAction} onClick={createRole}>Create Role</button></div>
           </div>
         </div>
       )}

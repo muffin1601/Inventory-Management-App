@@ -980,7 +980,6 @@ export const modulesService = {
 
   // Audit trail methods
   async getAuditTrail(): Promise<AuditTrailRow[]> {
-    /* Temporarily disabled until table is created
     try {
       const { data, error } = await supabase
         .from('audit_trail')
@@ -1018,13 +1017,9 @@ export const modulesService = {
       console.error('Error in getAuditTrail:', error);
       return [];
     }
-    */
-    return [];
   },
 
   async addAudit(input: Omit<AuditTrailRow, 'id' | 'created_at'>): Promise<AuditTrailRow> {
-    // Audit Trail is temporarily disabled for future implementation
-    /*
     try {
       let performedBy = input.performed_by;
       let performedByName = input.performed_by_name || 'System';
@@ -1072,8 +1067,6 @@ export const modulesService = {
       // but we return a mock object to satisfy the return type
       return { id: 'error', created_at: new Date().toISOString(), ...input } as AuditTrailRow;
     }
-    */
-    return { id: 'disabled', created_at: new Date().toISOString(), ...input } as AuditTrailRow;
   },
 
   async getAuthenticatedUser(): Promise<UserAccessRow | null> {
