@@ -270,34 +270,33 @@ export default function VendorsPage() {
             });
           }
         }
-        
-        // Log audit trail for vendor creation/update
-        if (editingVendor) {
-          const currentUser = await modulesService.getCurrentUser();
-          modulesService.addAudit({
-            action: 'Vendor Updated',
-            entity_type: 'vendor',
-            entity_id: editingVendor.id,
-            entity_name: payload.name,
-            reason: 'Vendor information updated',
-            performed_by: currentUser?.id,
-            performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
-            details: `Contact: ${payload.contact_person}, Email: ${payload.email}, Phone: ${payload.phone}`,
-          }).catch(err => console.warn('Audit log failed:', err));
-        } else {
-          const currentUser = await modulesService.getCurrentUser();
-          modulesService.addAudit({
-            action: 'Vendor Created',
-            entity_type: 'vendor',
-            entity_id: payload.name,
-            entity_name: payload.name,
-            reason: 'New vendor added',
-            performed_by: currentUser?.id,
-            performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
-            details: `Contact: ${payload.contact_person}, Email: ${payload.email}, Phone: ${payload.phone}`,
-          }).catch(err => console.warn('Audit log failed:', err));
-        }
-        
+      }
+
+      // Log audit trail for vendor creation/update
+      const currentUser = await modulesService.getCurrentUser();
+      if (editingVendor) {
+        modulesService.addAudit({
+          action: 'Vendor Updated',
+          entity_type: 'vendor',
+          entity_id: editingVendor.id,
+          entity_name: payload.name,
+          reason: 'Vendor information updated',
+          performed_by: currentUser?.id,
+          performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
+          details: `Contact: ${payload.contact_person}, Email: ${payload.email}, Phone: ${payload.phone}`,
+        }).catch(err => console.warn('Audit log failed:', err));
+        showToast('Vendor updated successfully.', 'success');
+      } else {
+        modulesService.addAudit({
+          action: 'Vendor Created',
+          entity_type: 'vendor',
+          entity_id: payload.name,
+          entity_name: payload.name,
+          reason: 'New vendor added',
+          performed_by: currentUser?.id,
+          performed_by_name: currentUser?.full_name || currentUser?.email || 'Unknown',
+          details: `Contact: ${payload.contact_person}, Email: ${payload.email}, Phone: ${payload.phone}`,
+        }).catch(err => console.warn('Audit log failed:', err));
         showToast('Vendor added successfully.', 'success');
       }
 

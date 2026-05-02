@@ -11,9 +11,19 @@ export type ProjectRecord = {
   updated_at?: string;
 };
 
+export type ProjectOrderRecord = {
+  id: string;
+  project_id: string;
+  order_number: string;
+  order_date: string;
+  status: string;
+  created_at?: string;
+};
+
 export type BoqItemRecord = {
   id: string;
   project_id: string;
+  order_id?: string;
   variant_id?: string;
   warehouse_id?: string;
   item_name: string;
@@ -63,6 +73,7 @@ function normalizeBoqItem(row: Record<string, unknown>): BoqItemRecord {
   return {
     id: safeString(row.id || ''),
     project_id: safeString(row.project_id || row.projectId || ''),
+    order_id: safeString(row.order_id || row.orderId || ''),
     variant_id: safeString(row.variant_id || row.variantId || row.variant || ''),
     warehouse_id: safeString(row.warehouse_id || row.warehouseId || row.warehouse || ''),
     item_name: safeString(row.item_name || row.item || row.description || row.name || ''),
@@ -80,7 +91,6 @@ async function pickBoqTable(): Promise<(typeof BOQ_TABLE_CANDIDATES)[number]> {
     const probe = await supabase.from(table).select('id', { count: 'exact', head: true }).limit(1);
     if (!probe.error) return table;
   }
-  // Default to first candidate if all fail - let the caller handle the error
   throw new Error('BOQ table not found. Please contact your administrator.');
 }
 
@@ -156,8 +166,8 @@ export const projectsService = {
     const filtered = normalized
       .filter((item) => item.id && item.name)
       .filter((row) => {
-        const rawRow = response.data?.find((d) => d.id === row.id) as any;
-        return rawRow?.deleted_at == null;
+        const rawRow = (response.data || []).find((d) => (d as Record<string, unknown>).id === row.id) as Record<string, unknown> | undefined;
+        return !rawRow || rawRow.deleted_at == null;
       });
 
     return filtered;
@@ -192,7 +202,6 @@ export const projectsService = {
     
     if (response.error) {
       if (response.error.code === 'PGRST116') {
-        // Record not found
         return null;
       }
       console.error('Failed to fetch project:', response.error);
@@ -242,12 +251,9 @@ export const projectsService = {
 
     if (response.error) {
       console.error('Failed to delete project:', response.error);
-      
-      // Specific error for foreign key constraint
       if (response.error.code === '23503') {
-        throw new Error('Cannot delete this project because it has active BOQ items or other linked data. Please remove these dependencies first.');
+        throw new Error('Cannot delete this project because it has active dependencies.');
       }
-      
       throw new Error(`Failed to delete project: ${response.error.message}`);
     }
   },
@@ -291,6 +297,7 @@ export const projectsService = {
 
   async addBoqItem(input: {
     projectId: string;
+    order_id?: string;
     variant_id?: string;
     warehouse_id?: string;
     item_name: string;
@@ -312,22 +319,19 @@ export const projectsService = {
       throw new Error('Quantity must be a positive number');
     }
 
-    const trimmedManufacturer = input.manufacturer?.trim() || '';
-    const trimmedNotes = input.notes?.trim() || '';
-    const delivered = typeof input.delivered === 'number' && Number.isFinite(input.delivered) ? input.delivered : 0;
-
     const payload: Record<string, unknown> = {
       project_id: input.projectId,
       item_name: trimmedName,
       quantity: input.quantity,
-      delivered,
+      delivered: input.delivered || 0,
       unit: trimmedUnit,
     };
 
+    if (input.order_id) payload.order_id = input.order_id;
     if (input.variant_id) payload.variant_id = input.variant_id;
     if (input.warehouse_id) payload.warehouse_id = input.warehouse_id;
-    if (trimmedManufacturer) payload.manufacturer = trimmedManufacturer;
-    if (trimmedNotes) payload.notes = trimmedNotes;
+    if (input.manufacturer) payload.manufacturer = input.manufacturer.trim();
+    if (input.notes) payload.notes = input.notes.trim();
 
     const insert = await insertBoqWithFallback(table, payload);
 
@@ -390,12 +394,97 @@ export const projectsService = {
 
   async deleteBoqItem(projectId: string, boqItemId: string): Promise<void> {
     const table = await pickBoqTable();
-
-    const del = await supabase.from(table).delete().eq('id', boqItemId);
-
-    if (del.error) {
-      console.error('Failed to delete BOQ item:', del.error);
-      throw new Error(`Failed to delete BOQ item: ${del.error.message}`);
+    const { error } = await supabase.from(table).delete().eq('id', boqItemId);
+    if (error) {
+      console.error('Failed to delete BOQ item:', error);
+      throw new Error(`Failed to delete BOQ item: ${error.message}`);
     }
   },
+
+  async listProjectOrders(projectId: string): Promise<ProjectOrderRecord[]> {
+    const { data, error } = await supabase
+      .from('project_orders')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('created_at', { ascending: false });
+
+    if (error) {
+      console.warn('Failed to fetch project orders:', error.message);
+      return [];
+    }
+
+    return (data || []).map((row) => normalizeProjectOrder(row as Record<string, unknown>));
+  },
+
+  async createProjectOrder(input: {
+    projectId: string;
+    order_number: string;
+    order_date?: string;
+    status?: string;
+  }): Promise<ProjectOrderRecord> {
+    const payload = {
+      project_id: input.projectId,
+      order_number: input.order_number.trim(),
+      order_date: input.order_date || new Date().toISOString().split('T')[0],
+      status: input.status || 'PENDING',
+    };
+
+    const { data, error } = await supabase
+      .from('project_orders')
+      .insert(payload)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Failed to create project order:', error);
+      throw new Error(`Failed to create project order: ${error.message}`);
+    }
+
+    return normalizeProjectOrder(data as Record<string, unknown>);
+  },
+
+  async deleteProjectOrder(projectId: string, orderId: string): Promise<void> {
+    const table = await pickBoqTable();
+    await supabase.from(table).delete().eq('order_id', orderId);
+
+    const { error } = await supabase
+      .from('project_orders')
+      .delete()
+      .eq('id', orderId);
+
+    if (error) {
+      console.error('Failed to delete project order:', error);
+      throw new Error(`Failed to delete project order: ${error.message}`);
+    }
+  },
+
+  async listBoqItemsForOrder(projectId: string, orderId: string): Promise<BoqItemRecord[]> {
+    const table = await pickBoqTable();
+    const response = await supabase
+      .from(table)
+      .select('*')
+      .eq('project_id', projectId)
+      .eq('order_id', orderId)
+      .order('created_at', { ascending: true });
+
+    if (response.error) {
+      console.error('Failed to fetch order BOQ items:', response.error);
+      throw new Error(`Failed to fetch order BOQ items: ${response.error.message}`);
+    }
+
+    return (response.data || [])
+      .map((row) => normalizeBoqItem(row as Record<string, unknown>))
+      .filter((row) => row.id && row.item_name);
+  },
 };
+
+function normalizeProjectOrder(row: Record<string, unknown>): ProjectOrderRecord {
+  return {
+    id: safeString(row.id || ''),
+    project_id: safeString(row.project_id || ''),
+    order_number: safeString(row.order_number || row.po_number || row.id || ''),
+    order_date: safeString(row.order_date || row.date || safeString(row.created_at).split('T')[0] || ''),
+    status: safeString(row.status || 'PENDING'),
+    created_at: safeString(row.created_at || ''),
+  };
+}
