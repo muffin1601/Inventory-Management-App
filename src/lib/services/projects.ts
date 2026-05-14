@@ -35,6 +35,15 @@ export type BoqItemRecord = {
   created_at?: string;
 };
 
+export type BoqHeaderRecord = {
+  id: string;
+  project_id: string;
+  order_id?: string;
+  after_index: number;
+  text: string;
+  created_at?: string;
+};
+
 const BOQ_TABLE_CANDIDATES = ['boq_items', 'project_boq_items', 'boq_lines'] as const;
 
 function safeString(value: unknown) {
@@ -95,6 +104,31 @@ function getMissingColumnName(error: unknown): string | null {
 
   const match = candidate.message.match(/Could not find the '([^']+)' column/i);
   return match?.[1] || null;
+}
+
+function isMissingTableError(error: unknown, tableName: string) {
+  if (!error || typeof error !== 'object') return false;
+  const candidate = error as { code?: string; message?: string; details?: string };
+  const message = `${candidate.message || ''} ${candidate.details || ''}`.toLowerCase();
+  return (
+    candidate.code === 'PGRST205' ||
+    candidate.code === '42P01' ||
+    message.includes(tableName.toLowerCase()) ||
+    message.includes('relation') ||
+    message.includes('not found') ||
+    message.includes('does not exist')
+  );
+}
+
+function normalizeBoqHeader(row: Record<string, unknown>): BoqHeaderRecord {
+  return {
+    id: safeString(row.id || ''),
+    project_id: safeString(row.project_id || ''),
+    order_id: safeString(row.order_id || ''),
+    after_index: safeNumber(row.after_index ?? row.afterIndex ?? 0, 0),
+    text: safeString(row.text || row.header_text || row.title || ''),
+    created_at: safeString(row.created_at || ''),
+  };
 }
 
 async function insertBoqWithFallback(table: string, payload: Record<string, unknown>) {
@@ -394,6 +428,61 @@ export const projectsService = {
     if (error) {
       console.error('Failed to delete BOQ item:', error);
       throw new Error(`Failed to delete BOQ item: ${error.message}`);
+    }
+  },
+
+  async listBoqHeaders(projectId: string, orderId: string): Promise<BoqHeaderRecord[]> {
+    let query = supabase
+      .from('boq_headers')
+      .select('*')
+      .eq('project_id', projectId)
+      .order('after_index', { ascending: true })
+      .order('created_at', { ascending: true });
+
+    query = orderId === 'master' ? query.is('order_id', null) : query.eq('order_id', orderId);
+    const { data, error } = await query;
+
+    if (error) {
+      if (isMissingTableError(error, 'boq_headers')) return [];
+      console.error('Failed to fetch BOQ headers:', error);
+      throw new Error(`Failed to fetch BOQ headers: ${error.message}`);
+    }
+
+    return (data || [])
+      .map((row) => normalizeBoqHeader(row as Record<string, unknown>))
+      .filter((row) => row.id && row.text);
+  },
+
+  async createBoqHeader(input: {
+    projectId: string;
+    orderId: string;
+    afterIndex: number;
+    text: string;
+  }): Promise<BoqHeaderRecord> {
+    const text = input.text.trim();
+    if (!text) throw new Error('Header text is required');
+
+    const payload = {
+      project_id: input.projectId,
+      order_id: input.orderId === 'master' ? null : input.orderId,
+      after_index: input.afterIndex,
+      text,
+    };
+
+    const { data, error } = await supabase.from('boq_headers').insert(payload).select('*').single();
+    if (error) {
+      console.error('Failed to create BOQ header:', error);
+      throw new Error(`Failed to create BOQ header: ${error.message}`);
+    }
+
+    return normalizeBoqHeader(data as Record<string, unknown>);
+  },
+
+  async deleteBoqHeader(headerId: string): Promise<void> {
+    const { error } = await supabase.from('boq_headers').delete().eq('id', headerId);
+    if (error) {
+      console.error('Failed to delete BOQ header:', error);
+      throw new Error(`Failed to delete BOQ header: ${error.message}`);
     }
   },
 

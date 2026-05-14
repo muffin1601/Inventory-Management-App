@@ -57,8 +57,7 @@ export default function OrderBoqPage() {
   const [qty, setQty] = React.useState('');
   const [isSaving, setIsSaving] = React.useState(false);
 
-  // Rows: items (from DB) + in-memory headers
-  // Headers are stored in localStorage keyed by orderId
+  // Rows: items (from DB) + headers (DB with localStorage fallback)
   const [headers, setHeaders] = React.useState<{ id: string; afterIndex: number; text: string }[]>([]);
 
   // Bulk add — product card grid
@@ -214,7 +213,22 @@ export default function OrderBoqPage() {
           setItems(itemsResult);
         }
       }
-      // Load headers from localStorage
+      const dbHeaders = await projectsService.listBoqHeaders(projectId, orderId);
+      if (dbHeaders.length > 0) {
+        setHeaders(dbHeaders.map((header) => ({
+          id: header.id,
+          afterIndex: header.after_index,
+          text: header.text,
+        })));
+        localStorage.setItem(headersKey, JSON.stringify(dbHeaders.map((header) => ({
+          id: header.id,
+          afterIndex: header.after_index,
+          text: header.text,
+        }))));
+        return;
+      }
+
+      // Fallback for older deployments before the boq_headers migration is applied.
       try {
         const stored = localStorage.getItem(headersKey);
         if (stored) setHeaders(JSON.parse(stored) as { id: string; afterIndex: number; text: string }[]);
@@ -239,6 +253,7 @@ export default function OrderBoqPage() {
       { table: 'inventory' },
       { table: 'warehouses' },
       { table: 'boq_items', filter: `project_id=eq.${projectId}` },
+      { table: 'boq_headers', filter: `project_id=eq.${projectId}` },
       { table: 'project_orders', filter: `project_id=eq.${projectId}` },
       { table: 'challans', filter: `project_id=eq.${projectId}` },
       { table: 'challan_items' },
@@ -251,6 +266,22 @@ export default function OrderBoqPage() {
   const saveHeaders = (newHeaders: typeof headers) => {
     setHeaders(newHeaders);
     localStorage.setItem(headersKey, JSON.stringify(newHeaders));
+  };
+
+  const addHeader = async (text: string) => {
+    const afterIndex = items.length - 1;
+    try {
+      const created = await projectsService.createBoqHeader({
+        projectId,
+        orderId,
+        afterIndex,
+        text,
+      });
+      saveHeaders([...headers, { id: created.id, afterIndex: created.after_index, text: created.text }]);
+    } catch (error) {
+      console.warn('BOQ header database save failed; using local fallback.', error);
+      saveHeaders([...headers, { id: `h_${Date.now()}`, afterIndex, text }]);
+    }
   };
 
   const buildVariantEntries = (productData: any[]) =>
@@ -337,9 +368,7 @@ export default function OrderBoqPage() {
         ui.showToast('Header text is required.', 'info');
         return;
       }
-      // Insert header after current last item
-      const newHeader = { id: `h_${Date.now()}`, afterIndex: items.length - 1, text: headerText.trim() };
-      saveHeaders([...headers, newHeader]);
+      await addHeader(headerText.trim());
       ui.showToast('Header added.', 'success');
       setHeaderText('');
       setShowAddRow(false);
@@ -632,7 +661,14 @@ export default function OrderBoqPage() {
     }
   };
 
-  const deleteHeader = (id: string) => {
+  const deleteHeader = async (id: string) => {
+    try {
+      if (!id.startsWith('h_')) {
+        await projectsService.deleteBoqHeader(id);
+      }
+    } catch (error) {
+      console.warn('BOQ header database delete failed; removing local copy only.', error);
+    }
     saveHeaders(headers.filter(h => h.id !== id));
   };
 
@@ -1072,7 +1108,7 @@ export default function OrderBoqPage() {
                 <tr key={row.headerId} className={styles.sectionHeaderRow}>
                   <td colSpan={7} className={styles.sectionHeaderCell}>{row.text}</td>
                   <td className={`${styles.actionsCell} ${styles.noPrint}`}>
-                    <button className={styles.deleteBtn} onClick={() => deleteHeader(row.headerId)}>
+                    <button className={styles.deleteBtn} onClick={() => void deleteHeader(row.headerId)}>
                       <Trash2 size={12} />
                     </button>
                   </td>
