@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import styles from './Challans.module.css';
 import {
   Search, Filter, Truck, CheckCircle2, Clock,
@@ -12,6 +12,8 @@ import TablePagination from '@/components/ui/TablePagination';
 import { projectsService, type ProjectRecord } from '@/lib/services/projects';
 import { modulesService } from '@/lib/services/modules';
 import type { ChallanRow as Challan } from '@/types/modules';
+import { inventoryService } from '@/lib/services/inventory';
+import { useSupabaseRealtime } from '@/lib/hooks/useSupabaseRealtime';
 
 const PAGE_SIZE_OPTIONS = [10, 25, 50];
 
@@ -36,6 +38,8 @@ export default function ChallansPage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [viewingChallan, setViewingChallan] = useState<Challan | null>(null);
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
+  const [warehouses, setWarehouses] = useState<Array<{ id: string; name: string }>>([]);
+  const [catalogProducts, setCatalogProducts] = useState<any[]>([]);
   const [dispatchItems, setDispatchItems] = useState<any[]>([]);
   const [loadingBoq, setLoadingBoq] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
@@ -45,31 +49,95 @@ export default function ChallansPage() {
     items: []
   });
 
-  // Load projects and challans on mount
-  useEffect(() => {
+  const loadData = useCallback(async () => {
     if (!isClient || !user) return;
 
-    const loadData = async () => {
-      try {
-        setIsLoading(true);
-        const [projRes, challansRes] = await Promise.all([
-          projectsService.listProjects(),
-          modulesService.getChallans()
-        ]);
+    try {
+      setIsLoading(true);
+      const [projRes, challansRes, warehouseRows, products] = await Promise.all([
+        projectsService.listProjects(),
+        modulesService.getChallans(),
+        inventoryService.getWarehouses(),
+        inventoryService.getProducts(),
+      ]);
 
-        setProjects(projRes);
-        setChallans(challansRes);
-
-      } catch (error) {
-        console.error('Error loading data:', error);
-        showToast('Failed to load challans', 'error');
-      } finally {
-        setIsLoading(false);
-      }
-    };
-
-    void loadData();
+      setProjects(projRes);
+      setChallans(challansRes);
+      setWarehouses(warehouseRows);
+      setCatalogProducts(products);
+    } catch (error) {
+      console.error('Error loading data:', error);
+      showToast('Failed to load challans', 'error');
+    } finally {
+      setIsLoading(false);
+    }
   }, [isClient, user, showToast]);
+
+  // Load projects and challans on mount
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
+
+  useSupabaseRealtime(
+    'challans-live',
+    useMemo(() => [
+      { table: 'projects' },
+      { table: 'boq_items' },
+      { table: 'challans' },
+      { table: 'challan_items' },
+      { table: 'inventory' },
+      { table: 'warehouses' },
+    ], []),
+    loadData,
+  );
+
+  const warehouseNameById = useMemo(() => {
+    return new Map(warehouses.map((warehouse) => [warehouse.id, warehouse.name]));
+  }, [warehouses]);
+
+  const catalogVariants = useMemo(() => {
+    return catalogProducts.flatMap((product) =>
+      (product.variants || []).map((variant: any) => ({
+        productName: product.name || '',
+        manufacturer:
+          variant.attributes?.Manufacturer ||
+          variant.attributes?.manufacturer ||
+          product.brand ||
+          '',
+        variant,
+      })),
+    );
+  }, [catalogProducts]);
+
+  const resolveBoqLink = useCallback((boq: any) => {
+    const normalizedName = String(boq.item_name || '').trim().toLowerCase();
+    const normalizedManufacturer = String(boq.manufacturer || '').trim().toLowerCase();
+
+    const entry = catalogVariants.find((candidate) => candidate.variant.id === boq.variant_id)
+      || catalogVariants.find((candidate) => String(candidate.variant.sku || '').trim().toLowerCase() === normalizedManufacturer)
+      || catalogVariants.find((candidate) => {
+        const productName = String(candidate.productName || '').trim().toLowerCase();
+        const sku = String(candidate.variant.sku || '').trim().toLowerCase();
+        const manufacturer = String(candidate.manufacturer || '').trim().toLowerCase();
+
+        if (sku && (normalizedName.includes(sku) || normalizedManufacturer.includes(sku))) return true;
+        if (!productName || normalizedName !== productName) return false;
+        return !normalizedManufacturer || normalizedManufacturer === manufacturer || normalizedManufacturer === sku;
+      });
+
+    const stockRows = entry?.variant?.stock_data || [];
+    const warehouseId = boq.warehouse_id || stockRows.find((row: any) => (Number(row.quantity) || 0) > 0)?.warehouse_id || stockRows[0]?.warehouse_id || '';
+    const warehouseName = warehouseId
+      ? warehouseNameById.get(warehouseId) || stockRows.find((row: any) => row.warehouse_id === warehouseId)?.warehouse_name || 'Linked warehouse'
+      : '';
+
+    return {
+      variantId: entry?.variant?.id || boq.variant_id || '',
+      warehouseId,
+      warehouseName,
+      manufacturer: entry?.manufacturer || boq.manufacturer || '',
+    };
+  }, [catalogVariants, warehouseNameById]);
 
   const handleProjectSelect = async (projectName: string) => {
     const project = projects.find(p => p.name === projectName);
@@ -82,15 +150,40 @@ export default function ChallansPage() {
 
       // Use live delivered quantity from database
       const processedItems = items.map((boq) => {
+        const resolved = resolveBoqLink(boq);
         return {
           ...boq,
           name: boq.item_name,
           delivered: boq.delivered || 0,
           balance: Math.max(0, boq.quantity - (boq.delivered || 0)),
+          boq_item_id: boq.id,
+          variant_id: resolved.variantId,
+          warehouse_id: resolved.warehouseId,
+          warehouse_name: resolved.warehouseName,
+          manufacturer: resolved.manufacturer,
           dispatchQty: 0
         };
       });
       setDispatchItems(processedItems);
+
+      await Promise.allSettled(
+        processedItems
+          .filter((item) => {
+            const original = items.find((boq) => boq.id === item.id);
+            return item.variant_id && item.warehouse_id && original && (
+              original.variant_id !== item.variant_id ||
+              original.warehouse_id !== item.warehouse_id ||
+              original.manufacturer !== item.manufacturer
+            );
+          })
+          .map((item) => projectsService.updateBoqItem({
+            projectId: project.id,
+            boqItemId: item.id,
+            variant_id: item.variant_id,
+            warehouse_id: item.warehouse_id,
+            manufacturer: item.manufacturer,
+          })),
+      );
     } catch (error) {
       console.error('Error loading BOQ items:', error);
       showToast('Failed to load project items', 'error');
@@ -102,6 +195,11 @@ export default function ChallansPage() {
   const updateDispatchQty = (index: number, val: string) => {
     const qty = parseFloat(val) || 0;
     const item = dispatchItems[index];
+
+    if (qty > 0 && (!item.variant_id || !item.warehouse_id)) {
+      showToast('This BOQ item is not linked to a catalog item and warehouse yet. Link it in BOQ before dispatch.', 'error');
+      return;
+    }
 
     if (qty > item.balance) {
       showToast(`Cannot exceed balance of ${item.balance} ${item.unit}`, 'error');
@@ -143,7 +241,9 @@ export default function ChallansPage() {
           name: i.name,
           quantity: i.dispatchQty,
           unit: i.unit,
-          boq_item_id: i.id
+          boq_item_id: i.boq_item_id || i.id,
+          variant_id: i.variant_id,
+          warehouse_id: i.warehouse_id
         }));
 
       if (itemsToDispatch.length === 0) {
@@ -564,18 +664,22 @@ export default function ChallansPage() {
                     <span>Choose dispatch quantities</span>
                   </div>
                   <div className={styles.fieldLabel} style={{ marginBottom: '0.5rem' }}>Dispatch Items</div>
-                  <div className={styles.itemHeader} style={{ gridTemplateColumns: '40px 2fr 80px 80px 80px 100px' }}>
+                  <div className={styles.itemHeader} style={{ gridTemplateColumns: '40px 2fr 1fr 1fr 80px 80px 80px 100px' }}>
                     <span>#</span>
                     <span>Item</span>
+                    <span>Manufacturer</span>
+                    <span>Warehouse</span>
                     <span style={{ textAlign: 'center' }}>BOQ</span>
                     <span style={{ textAlign: 'center' }}>Deliv.</span>
                     <span style={{ textAlign: 'center' }}>Bal.</span>
                     <span style={{ textAlign: 'right' }}>Dispatch</span>
                   </div>
                   {dispatchItems.map((item, idx) => (
-                    <div key={item.id} className={styles.itemRow} style={{ gridTemplateColumns: '40px 2fr 80px 80px 80px 100px', fontSize: '0.8rem' }}>
+                    <div key={item.id} className={styles.itemRow} style={{ gridTemplateColumns: '40px 2fr 1fr 1fr 80px 80px 80px 100px', fontSize: '0.8rem' }}>
                       <span style={{ color: 'var(--text-muted)' }}>{idx + 1}</span>
                       <span style={{ fontWeight: 600 }}>{item.name}</span>
+                      <span>{item.manufacturer || '-'}</span>
+                      <span>{item.warehouse_name || 'Not linked'}</span>
                       <span style={{ textAlign: 'center' }}>{item.quantity}</span>
                       <span style={{ textAlign: 'center', color: 'var(--accent-green)' }}>{item.delivered}</span>
                       <span
@@ -713,4 +817,3 @@ export default function ChallansPage() {
     </div>
   );
 }
-

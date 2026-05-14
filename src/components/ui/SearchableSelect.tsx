@@ -7,6 +7,7 @@ import styles from './SearchableSelect.module.css';
 type SearchableOption = {
   value: string;
   label: string;
+  description?: string;
   keywords?: string[];
 };
 
@@ -84,7 +85,8 @@ export default function SearchableSelect({
         }}
       >
         <span className={selected ? styles.value : styles.placeholder}>
-          {selected?.label || placeholder}
+          <span className={styles.triggerLabel}>{selected?.label || placeholder}</span>
+          {selected?.description ? <span className={styles.triggerDescription}>{selected.description}</span> : null}
         </span>
         <ChevronDown size={16} className={open ? styles.iconOpen : styles.icon} />
       </button>
@@ -116,7 +118,10 @@ export default function SearchableSelect({
                   setOpen(false);
                 }}
               >
-                {option.label}
+                <div className={styles.optionContent}>
+                  <span className={styles.optionLabel}>{option.label}</span>
+                  {option.description ? <span className={styles.optionDescription}>{option.description}</span> : null}
+                </div>
               </button>
             ))}
 

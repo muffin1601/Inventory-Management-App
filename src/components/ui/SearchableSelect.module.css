@@ -31,6 +31,27 @@
 
 .value {
   color: var(--text-primary);
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.12rem;
+}
+
+.triggerLabel {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.triggerDescription {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .icon,
@@ -105,6 +126,25 @@
   border-bottom: 1px solid #e5e7eb;
   background: #ffffff;
   font-size: 0.82rem;
+}
+
+.optionContent {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.15rem;
+}
+
+.optionLabel {
+  display: block;
+  width: 100%;
+}
+
+.optionDescription {
+  display: block;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.3;
 }
 
 .option:hover,

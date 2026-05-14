@@ -142,7 +142,9 @@ export interface AuditTrailRow {
 
 export interface ChallanItemRow {
   id: string;
+  boq_item_id?: string;
   variant_id?: string;
+  warehouse_id?: string;
   name: string;
   quantity: number;
   unit: string;

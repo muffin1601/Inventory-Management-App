@@ -112,10 +112,7 @@ export default function SiteRecordsPage() {
 
   }, []);
 
-  const saveSlips = (data: PaymentSlipRow[]) => {
-    setSlips(data);
-    modulesService.savePaymentSlips(data);
-  };
+
   const handleCreateReceipt = async () => {
     if (!newReceipt.project_name || (newReceipt.items?.length || 0) === 0) {
       showToast('Fill required fields', 'error');
@@ -383,7 +380,7 @@ export default function SiteRecordsPage() {
                           if (confirmed.confirmed) {
                             try {
                               const currentUser = await modulesService.getCurrentUser();
-                              await modulesService.deleteDeliveryReceipt(r.id, currentUser?.id || 'anonymous');
+                              await modulesService.deleteDeliveryReceipt(r.id);
                               
                               const next = receipts.filter(x => x.id !== r.id);
                               setReceipts(next);
@@ -483,7 +480,7 @@ export default function SiteRecordsPage() {
                               if (confirmed.confirmed) {
                                 try {
                                   const currentUser = await modulesService.getCurrentUser();
-                                  await modulesService.deletePaymentSlip(s.id, currentUser?.id || 'anonymous');
+                                  await modulesService.deletePaymentSlip(s.id);
                                   setSlips((current) => current.filter((entry) => entry.id !== s.id));
                                   await modulesService.addAudit({
                                     action: 'PAYMENT_DELETED',

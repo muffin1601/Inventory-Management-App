@@ -47,13 +47,7 @@ function safeNumber(value: unknown, fallback = 0) {
   return fallback;
 }
 
-function makeId(prefix: string) {
-  const random =
-    typeof crypto !== 'undefined' && 'randomUUID' in crypto
-      ? crypto.randomUUID()
-      : Math.random().toString(36).slice(2, 10);
-  return `${prefix}_${random}`;
-}
+
 
 function normalizeProject(row: Record<string, unknown>): ProjectRecord {
   const name = safeString(row.name || row.project_name || row.title || row.project || '');
@@ -350,6 +344,7 @@ export const projectsService = {
     manufacturer?: string;
     quantity?: number;
     unit?: string;
+    variant_id?: string;
     warehouse_id?: string;
     delivered?: number;
   }): Promise<BoqItemRecord> {
@@ -364,6 +359,7 @@ export const projectsService = {
     }
 
     if (input.manufacturer !== undefined) payload.manufacturer = input.manufacturer.trim();
+    if (input.variant_id !== undefined) payload.variant_id = input.variant_id;
     if (input.quantity !== undefined) {
       if (!Number.isFinite(input.quantity) || input.quantity <= 0) {
         throw new Error('Quantity must be a positive number');
@@ -438,6 +434,31 @@ export const projectsService = {
     if (error) {
       console.error('Failed to create project order:', error);
       throw new Error(`Failed to create project order: ${error.message}`);
+    }
+
+    return normalizeProjectOrder(data as Record<string, unknown>);
+  },
+
+  async updateProjectOrder(projectId: string, orderId: string, input: {
+    order_number?: string;
+    order_date?: string;
+    status?: string;
+  }): Promise<ProjectOrderRecord> {
+    const payload: Record<string, unknown> = {};
+    if (input.order_number !== undefined) payload.order_number = input.order_number.trim();
+    if (input.order_date !== undefined) payload.order_date = input.order_date;
+    if (input.status !== undefined) payload.status = input.status;
+
+    const { data, error } = await supabase
+      .from('project_orders')
+      .update(payload)
+      .eq('id', orderId)
+      .select('*')
+      .single();
+
+    if (error) {
+      console.error('Failed to update project order:', error);
+      throw new Error(`Failed to update project order: ${error.message}`);
     }
 
     return normalizeProjectOrder(data as Record<string, unknown>);

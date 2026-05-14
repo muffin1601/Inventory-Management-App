@@ -36,19 +36,11 @@ function isAuthLockRaceError(error: unknown): boolean {
   return message.includes('auth-token') && message.includes('another request stole it');
 }
 
-function wait(ms: number) {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
 
-function safeString(value: unknown) {
-  return typeof value === 'string' ? value : value == null ? '' : String(value);
-}
 
-function safeNumber(value: unknown, fallback = 0) {
-  if (typeof value === 'number' && Number.isFinite(value)) return value;
-  if (typeof value === 'string' && value.trim() !== '' && Number.isFinite(Number(value))) return Number(value);
-  return fallback;
-}
+
+
+
 
 async function findVendorIdByName(name: string): Promise<string | null> {
   const normalized = name.trim();
@@ -83,26 +75,116 @@ async function findProjectIdByName(name: string): Promise<string | null> {
   return data && data.length > 0 ? data[0].id : null;
 }
 
-async function loadVariantNames(variantIds: string[]) {
-  if (variantIds.length === 0) return new Map<string, string>();
-  const { data, error } = await supabase
-    .from('variants')
-    .select('id, sku, product:products(name)')
-    .in('id', variantIds);
-  const map = new Map<string, string>();
-  if (!error && data) {
-    data.forEach((row: any) => {
-      const name = row.product?.name || row.sku || '';
-      map.set(row.id, name);
-    });
-  }
-  return map;
+function getMissingColumnName(error: unknown): string | null {
+  if (!error || typeof error !== 'object') return null;
+  const candidate = error as { code?: string; message?: string };
+  if (candidate.code !== 'PGRST204' || !candidate.message) return null;
+  return candidate.message.match(/Could not find the '([^']+)' column/i)?.[1] || null;
 }
 
-const CHALLANS_KEY = 'ims_challans_v1';
-const DELIVERY_RECEIPTS_KEY = 'ims_delivery_receipts_v1';
-const PAYMENT_SLIPS_KEY = 'ims_payment_slips_v1';
-const BOQ_ITEMS_KEY = 'ims_project_boq_items_v1';
+async function insertWithMissingColumnFallback(table: string, payload: Record<string, unknown> | Record<string, unknown>[]) {
+  let nextPayload = Array.isArray(payload) ? payload.map((row) => ({ ...row })) : { ...payload };
+
+  for (let attempt = 0; attempt < 8; attempt += 1) {
+    const response = await supabase.from(table).insert(nextPayload);
+    if (!response.error) return response;
+
+    const missingColumn = getMissingColumnName(response.error);
+    if (!missingColumn) return response;
+
+    if (Array.isArray(nextPayload)) {
+      nextPayload = nextPayload.map((row) => {
+        const copy = { ...row };
+        delete copy[missingColumn];
+        return copy;
+      });
+    } else {
+      delete nextPayload[missingColumn];
+    }
+  }
+
+  return supabase.from(table).insert(nextPayload);
+}
+
+async function updateBoqDelivered(input: {
+  projectId?: string | null;
+  boqItemId?: string | null;
+  variantId?: string | null;
+  itemName?: string;
+  quantity: number;
+  direction: 1 | -1;
+}) {
+  const quantity = Number(input.quantity) || 0;
+  if (quantity <= 0) return;
+
+  let query = supabase.from('boq_items').select('id, delivered').limit(1);
+  if (input.boqItemId) {
+    query = query.eq('id', input.boqItemId);
+  } else if (input.projectId && input.variantId) {
+    query = query.eq('project_id', input.projectId).eq('variant_id', input.variantId);
+  } else if (input.projectId && input.itemName?.trim()) {
+    query = query.eq('project_id', input.projectId).ilike('item_name', input.itemName.trim());
+  } else {
+    return;
+  }
+
+  const { data: boqItem, error } = await query.maybeSingle();
+  if (error || !boqItem) return;
+
+  const delivered = Number(boqItem.delivered) || 0;
+  const nextDelivered = input.direction > 0 ? delivered + quantity : Math.max(0, delivered - quantity);
+  await supabase.from('boq_items').update({ delivered: nextDelivered }).eq('id', boqItem.id);
+}
+
+async function dispatchStock(input: {
+  variantId?: string | null;
+  warehouseId?: string | null;
+  quantity: number;
+  referenceId: string;
+  notes: string;
+  direction: 1 | -1;
+}) {
+  if (!input.variantId || !input.warehouseId || input.quantity <= 0) return;
+
+  const { data: rows, error } = await supabase
+    .from('inventory')
+    .select('id, quantity')
+    .eq('variant_id', input.variantId)
+    .eq('warehouse_id', input.warehouseId);
+
+  if (error) throw error;
+
+  const currentQty = (rows || []).reduce((sum: number, row: any) => sum + (Number(row.quantity) || 0), 0);
+  const nextQty = Math.max(0, currentQty - input.direction * input.quantity);
+  const primary = rows?.[0];
+
+  if (primary) {
+    const { error: updateError } = await supabase.from('inventory').update({ quantity: nextQty }).eq('id', primary.id);
+    if (updateError) throw updateError;
+    const duplicates = (rows || []).slice(1).map((row: any) => row.id);
+    if (duplicates.length > 0) await supabase.from('inventory').delete().in('id', duplicates);
+  } else if (input.direction < 0) {
+    const { error: insertError } = await supabase.from('inventory').insert({
+      variant_id: input.variantId,
+      warehouse_id: input.warehouseId,
+      quantity: input.quantity,
+    });
+    if (insertError) throw insertError;
+  }
+
+  await insertWithMissingColumnFallback('stock_movements', {
+    variant_id: input.variantId,
+    warehouse_id: input.warehouseId,
+    type: input.direction > 0 ? 'OUT' : 'IN',
+    quantity: input.quantity,
+    reference_id: input.referenceId,
+    notes: input.notes,
+  });
+}
+
+
+
+
 
 function normalizePaymentSlip(row: any): PaymentSlipRow {
   return {
@@ -121,22 +203,9 @@ function normalizePaymentSlip(row: any): PaymentSlipRow {
   };
 }
 
-function readLocalData<T>(key: string): T[] {
-  if (typeof window === 'undefined') return [];
-  const raw = window.localStorage.getItem(key);
-  if (!raw) return [];
-  try {
-    const parsed = JSON.parse(raw);
-    return Array.isArray(parsed) ? parsed : [];
-  } catch {
-    return [];
-  }
-}
 
-function writeLocalData<T>(key: string, rows: T[]) {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(key, JSON.stringify(rows));
-}
+
+
 
 // Permission definitions
 const PERMISSIONS: PermissionRow[] = [
@@ -249,7 +318,7 @@ export const modulesService = {
               this._roles = parsed;
               this._initialized = true;
             }
-          } catch (e) {
+          } catch {
             localStorage.removeItem('ims_roles_cache_v1');
           }
         }
@@ -532,7 +601,7 @@ export const modulesService = {
 
             return this._currentUserCache;
           }
-        } catch (e) {
+        } catch {
           localStorage.removeItem('ims_user_cache_v1');
         }
       }
@@ -1295,7 +1364,9 @@ export const modulesService = {
         }
         itemsByChallans.get(item.challan_id)!.push({
           id: item.id,
+          boq_item_id: item.boq_item_id,
           variant_id: item.variant_id,
+          warehouse_id: item.warehouse_id,
           name: item.name || `Item ${item.id}`,
           quantity: item.quantity || 0,
           unit: item.unit || 'Nos'
@@ -1324,7 +1395,7 @@ export const modulesService = {
     projectName: string,
     vendorName: string,
     dispatchDate: string,
-    items: Array<{ name: string; quantity: number; unit: string; variant_id?: string }>,
+    items: Array<{ name: string; quantity: number; unit: string; variant_id?: string; warehouse_id?: string; boq_item_id?: string }>,
     userId: string,
     projectId?: string,
     vendorId?: string
@@ -1365,13 +1436,15 @@ export const modulesService = {
       // Insert items
       const itemsToInsert = items.map(item => ({
         challan_id: challanId,
+        boq_item_id: item.boq_item_id || null,
         name: item.name.trim(),
         quantity: Number(item.quantity),
         unit: item.unit.trim(),
-        variant_id: item.variant_id || null
+        variant_id: item.variant_id || null,
+        warehouse_id: item.warehouse_id || null
       }));
 
-      const { error: itemsError } = await supabase.from('challan_items').insert(itemsToInsert);
+      const { error: itemsError } = await insertWithMissingColumnFallback('challan_items', itemsToInsert);
       if (itemsError) {
         await supabase.from('challans').delete().eq('id', challanId);
         throw itemsError;
@@ -1381,24 +1454,22 @@ export const modulesService = {
       if (finalProjectId) {
         try {
           for (const item of items) {
-            // Find in boq_items by project_id and item_name
-            const boqQuery = supabase
-              .from('boq_items')
-              .select('id, delivered')
-              .eq('project_id', finalProjectId)
-              .ilike('item_name', item.name.trim());
-
-            const { data: boqItem, error: fetchError } = await boqQuery.limit(1).single();
-
-            if (!fetchError && boqItem) {
-              const newDelivered = (Number(boqItem.delivered) || 0) + Number(item.quantity);
-              await supabase
-                .from('boq_items')
-                .update({ delivered: newDelivered })
-                .eq('id', boqItem.id);
-
-              console.log(`[BOQ-SYNC] Updated BOQ item ${item.name}: +${item.quantity}`);
-            }
+            await updateBoqDelivered({
+              projectId: finalProjectId,
+              boqItemId: item.boq_item_id,
+              variantId: item.variant_id,
+              itemName: item.name,
+              quantity: Number(item.quantity),
+              direction: 1,
+            });
+            await dispatchStock({
+              variantId: item.variant_id,
+              warehouseId: item.warehouse_id,
+              quantity: Number(item.quantity),
+              referenceId: challanId,
+              notes: `Dispatch challan ${challanNo.trim()} for ${projectName.trim()}`,
+              direction: 1,
+            });
           }
         } catch (e) {
           console.warn('[BOQ-SYNC] Sync warning:', e);
@@ -1469,28 +1540,31 @@ export const modulesService = {
 
       const { data: items, error: itemsError } = await supabase
         .from('challan_items')
-        .select('name, quantity')
+        .select('name, quantity, boq_item_id, variant_id, warehouse_id')
         .eq('challan_id', challanId);
+
+      if (itemsError) throw itemsError;
 
       // 2. Revert BOQ delivered quantities (Live Sync Reversal)
       if (challan.project_id && items && items.length > 0) {
         try {
           for (const item of items) {
-            const boqQuery = supabase
-              .from('boq_items')
-              .select('id, delivered')
-              .eq('project_id', challan.project_id)
-              .ilike('item_name', item.name.trim());
-
-            const { data: boqItem, error: boqError } = await boqQuery.limit(1).single();
-
-            if (!boqError && boqItem) {
-              const newDelivered = Math.max(0, (Number(boqItem.delivered) || 0) - Number(item.quantity));
-              await supabase
-                .from('boq_items')
-                .update({ delivered: newDelivered })
-                .eq('id', boqItem.id);
-            }
+            await updateBoqDelivered({
+              projectId: challan.project_id,
+              boqItemId: item.boq_item_id,
+              variantId: item.variant_id,
+              itemName: item.name,
+              quantity: Number(item.quantity),
+              direction: -1,
+            });
+            await dispatchStock({
+              variantId: item.variant_id,
+              warehouseId: item.warehouse_id,
+              quantity: Number(item.quantity),
+              referenceId: challanId,
+              notes: `Reversal for deleted challan ${challanId}`,
+              direction: -1,
+            });
           }
         } catch (revertError) {
           console.warn('[BOQ-REVERT] Warning during quantity reversal:', revertError);
@@ -1656,7 +1730,7 @@ export const modulesService = {
     }
   },
 
-  async deleteDeliveryReceipt(receiptId: string, userId: string): Promise<void> {
+  async deleteDeliveryReceipt(receiptId: string): Promise<void> {
     try {
       // 1. Identify which table contains this receipt
       const tables = ['delivery_receipts', 'receipts', 'challans'];
@@ -1883,7 +1957,7 @@ export const modulesService = {
     return normalizePaymentSlip(legacyData);
   },
 
-  async deletePaymentSlip(slipId: string, _userId: string): Promise<void> {
+  async deletePaymentSlip(slipId: string): Promise<void> {
     const { error } = await supabase.from('payment_slips').delete().eq('id', slipId);
     if (!error) return;
     if (!isSchemaError(error)) throw error;

@@ -18,6 +18,7 @@ import { useUi } from '@/components/ui/AppProviders';
 import TablePagination from '@/components/ui/TablePagination';
 import SearchableSelect from '@/components/ui/SearchableSelect';
 import type { OrderRow } from '@/types/modules';
+import { useSupabaseRealtime } from '@/lib/hooks/useSupabaseRealtime';
 
 type WarehouseOption = { id: string; name: string };
 type StockDataRow = { inventory_id?: string; warehouse_id?: string; warehouse_name: string; quantity: number };
@@ -66,32 +67,40 @@ function normalizeText(value: string | undefined) {
   return String(value || '').trim().toLowerCase();
 }
 
+function hasSpecificBoqIdentity(value: string) {
+  return Boolean(value && (/[a-z]+-\w+/i.test(value) || value.length >= 3));
+}
+
 function matchesBoqItem(variant: StockVariant, boqItem: BoqItemRecord) {
   const itemName = normalizeText(boqItem.item_name);
   const productName = normalizeText(variant.product_name);
   const sku = normalizeText(variant.sku);
-  const variantSummary = normalizeText(buildVariantSummary(variant.sku, variant.attributes));
+
   const productManufacturer = normalizeText(variant.attributes.Manufacturer || variant.product_brand || '');
   const boqManufacturer = normalizeText(boqItem.manufacturer);
   const unit = normalizeText(variant.attributes.Unit);
   const boqUnit = normalizeText(boqItem.unit);
 
   if (!itemName) return false;
-  
-  // 1. Precise SKU match (Best)
-  if (sku && (itemName === sku || itemName.includes(sku))) return true;
-  
-  // 2. Exact product name match
-  if (itemName === productName) return true;
-  
-  // 3. Partial name match - only if more specific info (like SKU) isn't contradicting
-  // If itemName has a SKU-like pattern in it, and it doesn't match this variant's SKU, don't match
+
+  if (sku && (itemName === sku || itemName.includes(sku) || boqManufacturer === sku || boqManufacturer.includes(sku))) {
+    return true;
+  }
+
+  if (boqManufacturer && productManufacturer && boqManufacturer === productManufacturer) {
+    return productName ? itemName === productName || itemName.includes(productName) : true;
+  }
+
+  if (hasSpecificBoqIdentity(boqManufacturer) && sku && boqManufacturer !== sku) {
+    return false;
+  }
+
   const itemNameSkuMatch = itemName.match(/\(([^)]+)\)/);
   if (itemNameSkuMatch && sku && itemNameSkuMatch[1] !== sku) return false;
 
+  if (itemName === productName && !boqManufacturer) return true;
   if (productName && itemName.includes(productName)) return true;
-  
-  if (boqManufacturer && productManufacturer && boqManufacturer === productManufacturer && productName && itemName.includes(productName)) return true;
+
   if (boqUnit && unit && boqUnit === unit && productName && itemName.includes(productName)) return true;
   return false;
 }
@@ -192,6 +201,21 @@ export default function StockPage() {
     window.addEventListener('ims-current-user-changed', onUserChange);
     return () => window.removeEventListener('ims-current-user-changed', onUserChange);
   }, [fetchData]);
+
+  useSupabaseRealtime(
+    'stock-live',
+    useMemo(() => [
+      { table: 'products' },
+      { table: 'variants' },
+      { table: 'inventory' },
+      { table: 'warehouses' },
+      { table: 'boq_items' },
+      { table: 'challans' },
+      { table: 'challan_items' },
+      { table: 'stock_movements' },
+    ], []),
+    fetchData,
+  );
 
   const promisedMap = useMemo(() => {
     const next = new Map<string, number>();

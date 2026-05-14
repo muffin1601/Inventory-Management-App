@@ -3,13 +3,15 @@
 import React from 'react';
 import styles from './Projects.module.css';
 import Link from 'next/link';
-import { Plus, Search, Building2, Eye, Pencil, Trash2, X } from 'lucide-react';
-import { projectsService, type ProjectRecord } from '@/lib/services/projects';
+import { Plus, Search, Eye, Pencil, Trash2, X } from 'lucide-react';
+import { projectsService, type ProjectRecord, type BoqItemRecord } from '@/lib/services/projects';
 import { useUi } from '@/components/ui/AppProviders';
+import { useSupabaseRealtime } from '@/lib/hooks/useSupabaseRealtime';
 
 export default function ProjectsPage() {
   const ui = useUi();
   const [projects, setProjects] = React.useState<ProjectRecord[]>([]);
+  const [allBoq, setAllBoq] = React.useState<BoqItemRecord[]>([]);
   const [isLoading, setIsLoading] = React.useState(true);
   const [query, setQuery] = React.useState('');
 
@@ -29,8 +31,12 @@ export default function ProjectsPage() {
   const load = React.useCallback(async () => {
     setIsLoading(true);
     try {
-      const result = await projectsService.listProjects();
+      const [result, boqResult] = await Promise.all([
+        projectsService.listProjects(),
+        projectsService.listAllBoqItems()
+      ]);
       setProjects(result);
+      setAllBoq(boqResult);
     } catch (err) {
       console.error(err);
       const errorMsg = err instanceof Error ? err.message : 'Unable to load projects';
@@ -43,6 +49,17 @@ export default function ProjectsPage() {
   React.useEffect(() => {
     void load();
   }, [load]);
+
+  useSupabaseRealtime(
+    'projects-list-live',
+    React.useMemo(() => [
+      { table: 'projects' },
+      { table: 'boq_items' },
+    ], []),
+    () => {
+      void load();
+    },
+  );
 
   const openCreate = React.useCallback(() => {
     setEditingProjectId('');
@@ -138,8 +155,8 @@ export default function ProjectsPage() {
     <div className={styles.container}>
       <div className={styles.header}>
         <div>
-          <h1 className={styles.title}>Projects & BOQ</h1>
-          <p className={styles.subtitle}>Manage project bill of quantities</p>
+          <h1 className={styles.title}>Client / Project Management</h1>
+          <p className={styles.subtitle}>Track delivery progress and project BOQs</p>
         </div>
         <button className={styles.primaryAction} onClick={openCreate}>
           <Plus size={16} /> New Project
@@ -157,9 +174,9 @@ export default function ProjectsPage() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <span className={styles.badge} title="Live database connection">
+          {/* <span className={styles.badge} title="Live database connection">
             <Building2 size={14} /> Live Mode
-          </span>
+          </span> */}
         </div>
 
         {isLoading ? (
@@ -167,42 +184,63 @@ export default function ProjectsPage() {
         ) : filtered.length === 0 ? (
           <div className={styles.empty}>No projects yet. Click "New Project" to create one.</div>
         ) : (
-          <div className={styles.grid}>
-            {filtered.map((project) => (
-              <div key={project.id} className={styles.projectCard}>
-                <div className={styles.cardTop}>
-                  <div className={styles.cardLeft}>
-                    <div className={styles.iconBox}>
-                      <Building2 size={18} />
-                    </div>
-                    <div className={styles.cardTitles}>
-                      <div className={styles.projectName}>{project.name}</div>
-                      <div className={styles.clientName}>{project.client_name || 'Client not set'}</div>
-                    </div>
-                  </div>
+          <div className={styles.tableWrap}>
+            <table className={styles.table}>
+              <thead>
+                <tr>
+                  <th>Client / Project</th>
+                  <th>Location</th>
+                  <th className={styles.numericCell}>Delivered %</th>
+                  <th className={styles.numericCell}>Pending %</th>
+                  <th className={styles.actionsCell}>Actions</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered.map((project) => {
+                  const projectItems = allBoq.filter(i => i.project_id === project.id);
+                  const totalQty = projectItems.reduce((sum, i) => sum + (i.quantity || 0), 0);
+                  const totalDelivered = projectItems.reduce((sum, i) => sum + (i.delivered || 0), 0);
+                  
+                  const deliveredPct = totalQty > 0 ? Math.round((totalDelivered / totalQty) * 100) : 0;
+                  const pendingPct = totalQty > 0 ? 100 - deliveredPct : 0;
 
-                  <div className={styles.cardActions}>
-                    <button type="button" className={styles.iconAction} title="Edit" onClick={() => openEdit(project)}>
-                      <Pencil size={16} />
-                    </button>
-                    <button
-                      type="button"
-                      className={`${styles.iconAction} ${styles.iconDanger}`}
-                      title="Delete"
-                      onClick={() => void deleteProject(project)}
-                    >
-                      <Trash2 size={16} />
-                    </button>
-                  </div>
-                </div>
-
-                <div className={styles.address}>{project.delivery_address || 'Address not set'}</div>
-
-                <Link className={styles.viewBtn} href={`/projects/${project.id}`}>
-                  <Eye size={16} /> View BOQ
-                </Link>
-              </div>
-            ))}
+                  return (
+                    <tr key={project.id}>
+                      <td>
+                        <div className={styles.projectName}>{project.name}</div>
+                        <div className={styles.clientName}>{project.client_name || 'No client'}</div>
+                      </td>
+                      <td>{project.delivery_address || '-'}</td>
+                      <td className={styles.numericCell}>
+                        <div className={styles.progressLabel}>{deliveredPct}%</div>
+                        <div className={styles.progressBar}>
+                          <div className={styles.progressFill} style={{ width: `${deliveredPct}%` }} />
+                        </div>
+                      </td>
+                      <td className={styles.numericCell}>
+                        <div className={styles.progressLabel}>{pendingPct}%</div>
+                        <div className={styles.progressBar}>
+                          <div className={styles.progressFill} style={{ width: `${pendingPct}%`, background: '#f87171' }} />
+                        </div>
+                      </td>
+                      <td className={styles.actionsCell}>
+                        <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                          <Link href={`/projects/${project.id}`} className={styles.primaryLink} title="View Orders">
+                            <Eye size={14} /> View Orders
+                          </Link>
+                          <button type="button" className={styles.iconAction} onClick={() => openEdit(project)}>
+                            <Pencil size={16} />
+                          </button>
+                          <button type="button" className={`${styles.iconAction} ${styles.iconDanger}`} onClick={() => void deleteProject(project)}>
+                            <Trash2 size={16} />
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
           </div>
         )}
       </div>

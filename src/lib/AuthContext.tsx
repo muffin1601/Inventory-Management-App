@@ -25,14 +25,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           if (parsed && (Date.now() - parsed._cachedAt < 3600000)) {
             return parsed;
           }
-        } catch (e) {}
+        } catch {}
       }
     }
     return null;
   });
   const [isLoading, setIsLoading] = useState(true);
   const [isClient, setIsClient] = useState(false);
-  const [initDone, setInitDone] = useState(false);
+
 
   // Initialize auth state on mount ONLY
   useEffect(() => {
@@ -88,7 +88,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timeoutId);
       subscription?.unsubscribe();
     };
-  }, []);
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
   const logout = async () => {
     try {
