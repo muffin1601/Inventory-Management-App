@@ -9,7 +9,7 @@ import {
 import { useUi } from '@/components/ui/AppProviders';
 import { useAuth } from '@/lib/AuthContext';
 import TablePagination from '@/components/ui/TablePagination';
-import { projectsService, type ProjectRecord } from '@/lib/services/projects';
+import { projectsService, type ProjectRecord, type BoqItemRecord } from '@/lib/services/projects';
 import { modulesService } from '@/lib/services/modules';
 import type { ChallanRow as Challan } from '@/types/modules';
 import { inventoryService } from '@/lib/services/inventory';
@@ -26,6 +26,19 @@ function generateChallanNumber(existingCount: number): string {
   const random = Math.random().toString(36).substring(2, 5).toUpperCase();
   return `CH-${year}-${month}-${sequence}-${random}`;
 }
+ 
+interface DispatchItem extends BoqItemRecord {
+  name: string;
+  delivered: number;
+  balance: number;
+  boq_item_id: string;
+  variant_id: string;
+  warehouse_id: string;
+  warehouse_name: string;
+  manufacturer: string;
+  dispatchQty: number;
+  components: any[];
+}
 
 export default function ChallansPage() {
   const { showToast, confirmAction } = useUi();
@@ -40,7 +53,7 @@ export default function ChallansPage() {
   const [projects, setProjects] = useState<ProjectRecord[]>([]);
   const [warehouses, setWarehouses] = useState<Array<{ id: string; name: string }>>([]);
   const [catalogProducts, setCatalogProducts] = useState<any[]>([]);
-  const [dispatchItems, setDispatchItems] = useState<any[]>([]);
+  const [dispatchItems, setDispatchItems] = useState<DispatchItem[]>([]);
   const [loadingBoq, setLoadingBoq] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [componentsMap, setComponentsMap] = useState<Record<string, any[]>>({});
@@ -162,8 +175,9 @@ export default function ChallansPage() {
           warehouse_id: resolved.warehouseId,
           warehouse_name: resolved.warehouseName,
           manufacturer: resolved.manufacturer,
-          dispatchQty: 0
-        };
+          dispatchQty: 0,
+          components: []
+        } as DispatchItem;
       });
       setDispatchItems(processedItems);
 
