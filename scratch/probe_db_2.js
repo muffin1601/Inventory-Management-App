@@ -32,14 +32,20 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
+async function getColumns() {
+  const { data, error } = await supabase.rpc('get_table_columns', { table_name: 'products' });
   if (error) {
-    console.error('Error:', error);
+    // If RPC doesn't exist, try direct SQL if we have a way, but we don't.
+    // Let's try a different approach: insert a dummy and see what fails.
+    console.error('RPC Error:', error);
+    
+    console.log('Trying dummy insert...');
+    const { error: iError } = await supabase.from('products').insert({ name: 'test' }).select();
+    if (iError) console.error('Insert error:', iError);
+    else console.log('Insert success!');
   } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+    console.log('Columns:', data);
   }
 }
 
-probe();
+getColumns();

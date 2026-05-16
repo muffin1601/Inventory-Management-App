@@ -14,7 +14,7 @@
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 0.5rem 1rem;
+  padding: 0.5rem 0rem;
 }
 
 .titleRow {
@@ -205,7 +205,7 @@
   justify-content: center;
   width: 20px;
   height: 20px;
-  background: #1e40af;
+  background: #111111;
   color: white;
   font-size: 0.65rem;
   font-weight: 800;
@@ -394,7 +394,7 @@
   width: 100%;
   padding: 0.5rem 0.75rem;
   border: 1.5px solid #e2e8f0;
-  border-radius: 4px;
+  border-radius: 0;
   font-size: 0.85rem;
   color: #1e293b;
   outline: none;
@@ -407,7 +407,7 @@
 
 .stockSummarySidebar {
   border: 1.5px solid #e2e8f0;
-  border-radius: 4px;
+  border-radius: 0;
   background: white;
   display: flex;
   flex-direction: column;
@@ -692,4 +692,45 @@
   gap: 0.5rem;
   flex-shrink: 0;
   background: #f8fafc;
+}
+
+.tableFooterActions {
+  margin-top: 1rem;
+  padding: 0rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.footerBtnGroup {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.footerBtnGroup .primaryAction,
+.footerBtnGroup .secondaryAction {
+  padding: 0.45rem 1rem;
+  font-size: 0.8rem;
+}
+
+.componentBreakdown {
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.75rem;
+  background: #f8fafc;
+  border-left: 3px solid var(--accent-primary);
+  border-radius: 0;
+}
+
+.componentHeader {
+  font-size: 0.65rem;
+  font-weight: 800;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+  margin-bottom: 0.25rem;
+  letter-spacing: 0.05em;
+}
+
+.componentLine {
+  font-size: 0.72rem;
+  color: var(--text-primary);
+  line-height: 1.4;
 }

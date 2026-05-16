@@ -75,6 +75,10 @@ export default function ProductsPage() {
   const [canCreateProducts, setCanCreateProducts] = useState(false);
   const [canEditProducts, setCanEditProducts] = useState(false);
   const [canDeleteProducts, setCanDeleteProducts] = useState(false);
+  
+  // Pagination State
+  const [currentPage, setCurrentPage] = useState(1);
+  const itemsPerPage = 20;
 
   useEffect(() => {
     const initPermissions = async () => {
@@ -89,19 +93,11 @@ export default function ProductsPage() {
     };
 
     initPermissions();
-
-    const onUserChange = async () => {
-      const refreshed = await modulesService.getCurrentUser();
-      if (refreshed) {
-        setCanCreateProducts(await modulesService.hasPermission(refreshed, 'products.create'));
-        setCanEditProducts(await modulesService.hasPermission(refreshed, 'products.edit'));
-        setCanDeleteProducts(await modulesService.hasPermission(refreshed, 'products.delete'));
-      }
-    };
-
-    window.addEventListener('ims-current-user-changed', onUserChange);
-    return () => window.removeEventListener('ims-current-user-changed', onUserChange);
   }, []);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [searchTerm]);
 
   const fetchProducts = async () => {
     try {
@@ -214,10 +210,48 @@ export default function ProductsPage() {
     attributes: {} as Record<string, string>,
     warehouse: '',
     unit: 'Numbers',
-    quantity: 0
+    quantity: 0,
+    components: [] as any[]
   });
 
-  const handleOpenEditVariant = (product: any, variant: any) => {
+  // Component Management
+  const [isComponentModalOpen, setIsComponentModalOpen] = useState(false);
+  const [activeVariantForComponents, setActiveVariantForComponents] = useState<any>(null);
+  const [activeComponents, setActiveComponents] = useState<any[]>([]);
+  const [isSavingComponents, setIsSavingComponents] = useState(false);
+
+  const handleOpenComponents = async (variant: any) => {
+    try {
+      setActiveVariantForComponents(variant);
+      const components = await inventoryService.getVariantComponents(variant.id);
+      setActiveComponents(components);
+      setIsComponentModalOpen(true);
+    } catch (err) {
+      console.error("Failed to load components:", err);
+      showToast("Could not load sub-items.", "error");
+    }
+  };
+
+  const saveComponents = async () => {
+    if (!activeVariantForComponents) return;
+    try {
+      setIsSavingComponents(true);
+      await inventoryService.updateVariantComponents(activeVariantForComponents.id, activeComponents.map(c => ({
+        variant_id: c.variant_id,
+        quantity: c.quantity
+      })));
+      showToast("Sub-items updated.", "success");
+      setIsComponentModalOpen(false);
+      fetchProducts();
+    } catch (err) {
+      console.error("Failed to save components:", err);
+      showToast("Could not save sub-items.", "error");
+    } finally {
+      setIsSavingComponents(false);
+    }
+  };
+
+  const handleOpenEditVariant = async (product: any, variant: any) => {
     setActiveProductForSingle(product);
     setActiveVariantForEdit(variant);
     setIsEditingVariant(true);
@@ -225,14 +259,26 @@ export default function ProductsPage() {
     const mainStock = variant.stock_data?.[0];
     const currentWarehouse = warehousesList.find(w => w.id === mainStock?.warehouse_id)?.name || 'Main Warehouse';
 
+    const components = await inventoryService.getVariantComponents(variant.id);
+    const componentsWithStock = components.map(c => {
+      const v = products.flatMap(p => p.variants || []).find((v: any) => v.id === c.variant_id);
+      const stock = v?.stock_data?.reduce((sum: number, s: any) => sum + (s.quantity || 0), 0) || 0;
+      return { ...c, currentStock: stock, adjustment: 0 };
+    });
+
+    const attrs = variant.attributes || {};
+    const mfr = attrs.Manufacturer || attrs.MANUFACTURER || attrs.manufacturer || attrs.Brand || attrs.brand || '';
+    const unit = attrs.Unit || attrs.UNIT || attrs.unit || variant.unit || 'Numbers';
+
     setSingleVariantForm({
       sku: variant.sku,
-      manufacturer: variant.attributes.Manufacturer || '',
+      manufacturer: mfr,
       price: variant.price || 0,
-      attributes: variant.attributes || {},
+      attributes: attrs,
       warehouse: currentWarehouse,
-      unit: variant.unit || 'Numbers',
-      quantity: mainStock?.quantity || 0
+      unit: unit,
+      quantity: mainStock?.quantity || 0,
+      components: componentsWithStock || []
     });
   };
 
@@ -475,7 +521,7 @@ export default function ProductsPage() {
   const submitAddSingleVariant = async () => {
     try {
       showToast("Adding variant to stock...", 'info');
-      await inventoryService.addVariant({
+      const variant = await inventoryService.addVariant({
         product_id: activeProductForSingle.id,
         price: singleVariantForm.price,
         attributes: {
@@ -487,11 +533,35 @@ export default function ProductsPage() {
         stock_quantity: singleVariantForm.quantity,
         sku: singleVariantForm.sku
       });
+
+      const u = (singleVariantForm.unit || '').toUpperCase();
+      if ((u === 'SET' || u === 'SETS') && singleVariantForm.components.length > 0) {
+        // 1. Save component relationships
+        await inventoryService.updateVariantComponents(variant.id, singleVariantForm.components.map(c => ({
+          variant_id: c.variant_id,
+          quantity: c.quantity
+        })));
+
+        // 2. Handle stock adjustments if any
+        const adjustments = singleVariantForm.components
+          .filter(c => c.adjustment !== 0)
+          .map(c => ({
+            variant_id: c.variant_id,
+            quantity: c.adjustment,
+            notes: `Initial stock adjustment from SET creation: ${singleVariantForm.sku}`
+          }));
+        
+        if (adjustments.length > 0) {
+          await inventoryService.bulkAdjustStock(adjustments);
+        }
+      }
+
       setIsAddingSingle(false);
       showToast("Variant added to stock successfully.", 'success');
       fetchProducts();
-    } catch {
-      alert("Error adding variant");
+    } catch (err) {
+      console.error("Error adding variant:", err);
+      showToast("Error adding variant", "error");
     }
   };
 
@@ -540,11 +610,34 @@ export default function ProductsPage() {
         }
       }
 
+      const u = (singleVariantForm.unit || '').toUpperCase();
+      if ((u === 'SET' || u === 'SETS')) {
+        // 1. Save component relationships
+        await inventoryService.updateVariantComponents(activeVariantForEdit.id, singleVariantForm.components.map(c => ({
+          variant_id: c.variant_id,
+          quantity: c.quantity
+        })));
+
+        // 2. Handle stock adjustments if any
+        const adjustments = singleVariantForm.components
+          .filter(c => c.adjustment !== 0)
+          .map(c => ({
+            variant_id: c.variant_id,
+            quantity: c.adjustment,
+            notes: `Stock adjustment from SET edit: ${activeVariantForEdit.sku}`
+          }));
+        
+        if (adjustments.length > 0) {
+          await inventoryService.bulkAdjustStock(adjustments);
+        }
+      }
+
       showToast("Variant updated successfully.", 'success');
       setIsEditingVariant(false);
       fetchProducts();
-    } catch {
-      alert("Error updating variant data");
+    } catch (err) {
+      console.error("Error updating variant:", err);
+      showToast("Error updating variant data", "error");
     }
   };
 
@@ -665,6 +758,9 @@ export default function ProductsPage() {
     p.brand?.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const totalPages = Math.ceil(filteredProducts.length / itemsPerPage);
+  const paginatedProducts = filteredProducts.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+
   return (
     <div className={styles.container}>
       {!isCreating && !isAddingSingle && !isEditingVariant && (
@@ -706,8 +802,8 @@ export default function ProductsPage() {
                 <div className={styles.spinner}></div>
                 <p className={styles.loadingText}>Loading catalog...</p>
               </div>
-            ) : filteredProducts.length > 0 ? (
-              filteredProducts.map(product => {
+            ) : paginatedProducts.length > 0 ? (
+              paginatedProducts.map(product => {
                 const isExpanded = expandedProducts.has(product.id);
                 return (
                   <div key={product.id} className={styles.productGroup}>
@@ -788,7 +884,19 @@ export default function ProductsPage() {
                                 ))}
                               </div>
                               <div className={styles.warehouseTag}>{v.stock_data?.[0]?.warehouse_name || '-'}</div>
-                              <span className={styles.variantStockText}>{v.stock_data?.reduce((acc:any, s:any) => acc + s.quantity, 0) || 0}</span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                                <span className={styles.variantStockText}>{v.stock_data?.reduce((acc:any, s:any) => acc + s.quantity, 0) || 0}</span>
+                                {(v.attributes?.Unit?.toUpperCase() === 'SET' || v.attributes?.Unit?.toUpperCase() === 'SETS' || v.attributes?.unit?.toUpperCase() === 'SET' || v.attributes?.unit?.toUpperCase() === 'SETS') && (
+                                  <button 
+                                    className={styles.miniBtn} 
+                                    style={{ color: 'var(--accent-primary)', background: '#eff6ff', border: '1px solid #dbeafe' }}
+                                    title="Manage Sub-items"
+                                    onClick={() => handleOpenComponents(v)}
+                                  >
+                                    <Layers size={12}/>
+                                  </button>
+                                )}
+                              </div>
                               <div className={styles.variantRowActions}>
                                 {canEditProducts && <button className={styles.miniBtn} title="Edit Option" onClick={() => handleOpenEditVariant(product, v)}>
                                   <Edit2 size={12}/>
@@ -812,6 +920,48 @@ export default function ProductsPage() {
               </div>
             )}
           </div>
+
+          {/* Pagination UI */}
+          {totalPages > 1 && (
+            <div className={styles.pagination}>
+              <button 
+                className={`${styles.pageBtn} ${currentPage === 1 ? styles.pageBtnDisabled : ''}`}
+                onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
+                disabled={currentPage === 1}
+              >
+                <ChevronLeft size={16} />
+              </button>
+              
+              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
+                <button 
+                  key={page}
+                  className={`${styles.pageBtn} ${currentPage === page ? styles.pageBtnActive : ''}`}
+                  onClick={() => setCurrentPage(page)}
+                >
+                  {page}
+                </button>
+              )).filter((_, i, arr) => {
+                // Show first, last, and window around current
+                if (arr.length <= 7) return true;
+                return i === 0 || i === arr.length - 1 || Math.abs(i + 1 - currentPage) <= 2;
+              }).reduce((acc: any[], page, i, arr) => {
+                // Add ellipses
+                if (i > 0 && page !== (arr[i-1] as number) + 1) {
+                  acc.push(<span key={`ellipsis-${i}`} style={{ padding: '0 0.5rem', color: '#94a3b8' }}>...</span>);
+                }
+                acc.push(page);
+                return acc;
+              }, [])}
+
+              <button 
+                className={`${styles.pageBtn} ${currentPage === totalPages ? styles.pageBtnDisabled : ''}`}
+                onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
+                disabled={currentPage === totalPages}
+              >
+                <ChevronRight size={16} />
+              </button>
+            </div>
+          )}
         </div>
       ) : null}
 
@@ -883,7 +1033,7 @@ export default function ProductsPage() {
                ))}
             </div>
 
-            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', padding: '1.25rem', background: '#f8fafc', border: '1px solid #f1f5f9', marginBottom: '2.5rem' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '1rem', padding: '1.25rem', background: '#f8fafc', border: '1px solid #f1f5f9', marginBottom: '1rem' }}>
               <div className={styles.formGroup} style={{ marginBottom: 0 }}>
                 <label style={{ fontSize: '0.7rem' }}>Unit Type</label>
                 <SearchableSelect
@@ -919,6 +1069,115 @@ export default function ProductsPage() {
               </div>
             </div>
 
+            {(singleVariantForm.unit?.toUpperCase() === 'SET' || singleVariantForm.unit?.toUpperCase() === 'SETS') && (
+              <div style={{ marginBottom: '2.5rem', background: '#fff', border: '1px solid #e2e8f0', padding: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-primary)', marginBottom: '1.25rem' }}>
+                   <Layers size={14} strokeWidth={2.5} /> <span style={{ fontWeight: 800, fontSize: '0.75rem' }}>SET COMPONENTS & INDIVIDUAL STOCK</span>
+                </div>
+                
+                <div style={{ marginBottom: '1.25rem' }}>
+                  <SearchableSelect
+                    value=""
+                    placeholder="Search catalog for component..."
+                    options={products.flatMap(p => (p.variants || []).map((v: any) => ({
+                      value: v.id,
+                      label: `${p.name} (${v.sku})`,
+                      keywords: [p.name, v.sku]
+                    })))}
+                    onChange={(variantId) => {
+                      const variant = products.flatMap(p => p.variants || []).find((v: any) => v.id === variantId);
+                      const product = products.find(p => p.variants?.some((v: any) => v.id === variantId));
+                      const stock = variant?.stock_data?.reduce((sum: number, s: any) => sum + (s.quantity || 0), 0) || 0;
+                      if (variant && !singleVariantForm.components.some(c => c.variant_id === variantId)) {
+                        setSingleVariantForm(prev => ({
+                          ...prev,
+                          components: [...prev.components, {
+                            variant_id: variantId,
+                            sku: variant.sku,
+                            name: product.name,
+                            quantity: 1,
+                            currentStock: stock,
+                            adjustment: 0,
+                            unit: product.unit || variant.attributes?.Unit || 'Nos'
+                          }]
+                        }));
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className={styles.componentList} style={{ border: '1px solid #f1f5f9', borderRadius: '4px' }}>
+                  {singleVariantForm.components.length > 0 ? (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ background: '#f8fafc', fontSize: '0.65rem', textAlign: 'left', color: '#64748b' }}>
+                        <tr>
+                          <th style={{ padding: '10px 12px' }}>COMPONENT</th>
+                          <th style={{ padding: '10px 12px', width: '80px' }}>QTY/SET</th>
+                          <th style={{ padding: '10px 12px', width: '100px' }}>CURR. STOCK</th>
+                          <th style={{ padding: '10px 12px', width: '100px' }}>ADJUSTMENT</th>
+                          <th style={{ padding: '10px 12px', width: '40px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {singleVariantForm.components.map((comp, idx) => (
+                          <tr key={comp.variant_id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '10px 12px' }}>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 700 }}>{comp.name}</div>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>{comp.sku} ({comp.unit})</div>
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <input
+                                type="number"
+                                value={comp.quantity}
+                                style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', border: '1px solid #e2e8f0' }}
+                                onChange={(e) => {
+                                  const newComps = [...singleVariantForm.components];
+                                  newComps[idx].quantity = parseFloat(e.target.value) || 0;
+                                  setSingleVariantForm(prev => ({ ...prev, components: newComps }));
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '10px 12px', fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                              {comp.currentStock} {comp.unit}
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <input
+                                type="number"
+                                placeholder="+/-"
+                                style={{ width: '100%', padding: '4px 6px', fontSize: '0.75rem', border: '1px solid #e2e8f0', background: '#fff' }}
+                                onChange={(e) => {
+                                  const newComps = [...singleVariantForm.components];
+                                  newComps[idx].adjustment = parseFloat(e.target.value) || 0;
+                                  setSingleVariantForm(prev => ({ ...prev, components: newComps }));
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '10px 12px' }}>
+                              <button
+                                type="button"
+                                className={styles.miniBtn}
+                                style={{ color: '#ef4444' }}
+                                onClick={() => setSingleVariantForm(prev => ({
+                                  ...prev,
+                                  components: prev.components.filter((_, i) => i !== idx)
+                                }))}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div style={{ padding: '1.5rem', textAlign: 'center', color: '#94a3b8', fontSize: '0.75rem' }}>
+                      Add components to manage their breakdown and stock levels.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
             <div className={styles.footerActions} style={{ borderTop: '1px solid #f1f5f9', paddingTop: '2rem' }}>
               <div className={styles.leftActions}>
                  <button type="button" className={styles.wizardBackBtn} onClick={() => setIsAddingSingle(false)}>Cancel & Clear</button>
@@ -927,7 +1186,7 @@ export default function ProductsPage() {
                  <button 
                   type="submit"
                   className={styles.wizardNextBtn} 
-                  style={{ background: '#312e81', fontSize: '0.8rem', padding: '0.6rem 2rem' }}
+                  style={{ background: '#000', fontSize: '0.8rem', padding: '0.6rem 2rem' }}
                  >
                    Verify & Add to Stock
                  </button>
@@ -978,39 +1237,37 @@ export default function ProductsPage() {
             </div>
 
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '1.25rem', marginBottom: '2.5rem' }}>
-               {Object.keys(activeVariantForEdit.attributes).map(attrName => {
-                 // UNIVERSAL SCRAPER: Gather all values across ALL products for THIS attribute name
-                 const globalPresets = attributes.find(a => a.name.toLowerCase() === attrName.toLowerCase())?.values || [];
-                 const catalogValues = products.flatMap((p: any) => 
-                  p.variants?.flatMap((v: any) => (v.attributes as any)[attrName] || []) || []
-                 );
-                 
-                 // Merge global presets with everything found in the catalog
-                 const universalValues = Array.from(new Set([
-                   ...globalPresets,
-                   ...catalogValues,
-                   (activeVariantForEdit.attributes as any)[attrName]
-                 ].filter(Boolean))).sort();
+               {Object.keys(activeVariantForEdit.attributes)
+                 .filter(k => !['Manufacturer', 'MANUFACTURER', 'manufacturer', 'Unit', 'UNIT', 'unit', 'Brand', 'brand'].includes(k))
+                 .map(attrName => {
+                  // UNIVERSAL SCRAPER: Gather all values across ALL products for THIS attribute name
+                  const globalPresets = attributes.find(a => a.name.toLowerCase() === attrName.toLowerCase())?.values || [];
+                  const catalogValues = products.flatMap((p: any) => 
+                   p.variants?.flatMap((v: any) => (v.attributes as any)[attrName] || []) || []
+                  );
+                  
+                  // Merge global presets with everything found in the catalog
+                  const universalValues = Array.from(new Set([
+                    ...globalPresets,
+                    ...catalogValues,
+                    (activeVariantForEdit.attributes as any)[attrName]
+                  ].map(v => (v || '').toString().trim()).filter(Boolean))).sort();
 
-                 return (
-                   <div key={attrName} className={styles.formGroup}>
-                     <label style={{ fontSize: '0.7rem' }}>{attrName}</label>
-                     <select 
-                       className={styles.formSelectCompact}
-                       value={singleVariantForm.attributes[attrName] || ''}
-                       onChange={e => setSingleVariantForm(p => ({ 
-                         ...p, 
-                         attributes: { ...p.attributes, [attrName]: e.target.value } 
-                       }))}
-                     >
-                       <option value="">Select {attrName}...</option>
-                       {universalValues.map(val => (
-                         <option key={val} value={val}>{val}</option>
-                       ))}
-                     </select>
-                   </div>
-                 );
-               })}
+                  return (
+                    <div key={attrName} className={styles.formGroup}>
+                      <label style={{ fontSize: '0.7rem' }}>{attrName}</label>
+                      <SearchableSelect
+                        value={singleVariantForm.attributes[attrName] || ''}
+                        options={universalValues.map(v => ({ value: v, label: v, keywords: [v] }))}
+                        placeholder={`Select ${attrName}...`}
+                        onChange={(val) => setSingleVariantForm(p => ({ 
+                          ...p, 
+                          attributes: { ...p.attributes, [attrName]: val } 
+                        }))}
+                      />
+                    </div>
+                  );
+                })}
             </div>
 
             <div className={styles.footerSection}>
@@ -1048,6 +1305,115 @@ export default function ProductsPage() {
                 />
               </div>
             </div>
+
+            {(singleVariantForm.unit?.toUpperCase() === 'SET' || singleVariantForm.unit?.toUpperCase() === 'SETS') && (
+              <div style={{ marginTop: '2.5rem', borderTop: '1px dashed #e2e8f0', paddingTop: '1.5rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--accent-primary)', marginBottom: '1rem' }}>
+                   <Layers size={14} strokeWidth={2.5} /> <span style={{ fontWeight: 800, fontSize: '0.75rem' }}>SET COMPONENTS & INDIVIDUAL STOCK</span>
+                </div>
+                
+                <div style={{ marginBottom: '1rem' }}>
+                  <SearchableSelect
+                    value=""
+                    placeholder="Search catalog for component..."
+                    options={products.flatMap(p => (p.variants || []).map((v: any) => ({
+                      value: v.id,
+                      label: `${p.name} (${v.sku})`,
+                      keywords: [p.name, v.sku]
+                    })))}
+                    onChange={(variantId) => {
+                      const variant = products.flatMap(p => p.variants || []).find((v: any) => v.id === variantId);
+                      const product = products.find(p => p.variants?.some((v: any) => v.id === variantId));
+                      const stock = variant?.stock_data?.reduce((sum: number, s: any) => sum + (s.quantity || 0), 0) || 0;
+                      if (variant && !singleVariantForm.components.some(c => c.variant_id === variantId)) {
+                        setSingleVariantForm(prev => ({
+                          ...prev,
+                          components: [...prev.components, {
+                            variant_id: variantId,
+                            sku: variant.sku,
+                            name: product.name,
+                            quantity: 1,
+                            currentStock: stock,
+                            adjustment: 0,
+                            unit: product.unit || variant.attributes?.Unit || 'Nos'
+                          }]
+                        }));
+                      }
+                    }}
+                  />
+                </div>
+
+                <div className={styles.componentList} style={{ background: '#f8fafc', border: '1px solid #f1f5f9', borderRadius: '4px' }}>
+                  {singleVariantForm.components.length > 0 ? (
+                    <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                      <thead style={{ background: '#f1f5f9', fontSize: '0.65rem', textAlign: 'left' }}>
+                        <tr>
+                          <th style={{ padding: '8px 12px' }}>COMPONENT</th>
+                          <th style={{ padding: '8px 12px', width: '80px' }}>QTY/SET</th>
+                          <th style={{ padding: '8px 12px', width: '100px' }}>CURR. STOCK</th>
+                          <th style={{ padding: '8px 12px', width: '100px' }}>ADJUSTMENT</th>
+                          <th style={{ padding: '8px 12px', width: '40px' }}></th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {singleVariantForm.components.map((comp, idx) => (
+                          <tr key={comp.variant_id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                            <td style={{ padding: '8px 12px' }}>
+                              <div style={{ fontSize: '0.75rem', fontWeight: 600 }}>{comp.name}</div>
+                              <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)' }}>{comp.sku} ({comp.unit})</div>
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <input
+                                type="number"
+                                value={comp.quantity}
+                                style={{ width: '100%', padding: '4px', fontSize: '0.75rem', border: '1px solid #e2e8f0' }}
+                                onChange={(e) => {
+                                  const newComps = [...singleVariantForm.components];
+                                  newComps[idx].quantity = parseFloat(e.target.value) || 0;
+                                  setSingleVariantForm(prev => ({ ...prev, components: newComps }));
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 12px', fontSize: '0.75rem', fontWeight: 600, color: '#475569' }}>
+                              {comp.currentStock} {comp.unit}
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <input
+                                type="number"
+                                placeholder="+/-"
+                                style={{ width: '100%', padding: '4px', fontSize: '0.75rem', border: '1px solid #e2e8f0', background: '#fff' }}
+                                onChange={(e) => {
+                                  const newComps = [...singleVariantForm.components];
+                                  newComps[idx].adjustment = parseFloat(e.target.value) || 0;
+                                  setSingleVariantForm(prev => ({ ...prev, components: newComps }));
+                                }}
+                              />
+                            </td>
+                            <td style={{ padding: '8px 12px' }}>
+                              <button
+                                type="button"
+                                className={styles.miniBtn}
+                                style={{ color: '#ef4444' }}
+                                onClick={() => setSingleVariantForm(prev => ({
+                                  ...prev,
+                                  components: prev.components.filter((_, i) => i !== idx)
+                                }))}
+                              >
+                                <Trash2 size={12} />
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <div style={{ padding: '1.5rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.75rem' }}>
+                      Add components to this SET above.
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             <div className={styles.footerActions} style={{ borderTop: '1px solid #f1f5f9', paddingTop: '1.5rem' }}>
               <div className={styles.leftActions}>
@@ -1440,11 +1806,11 @@ export default function ProductsPage() {
                  Save as Draft
                </button>
                {currentStep < 3 ? (
-                 <button type="button" className={styles.wizardNextBtn} onClick={handleNext}>
+                 <button type="button" className={styles.wizardNextBtn} onClick={handleNext} style={{ background: '#000' }}>
                    {currentStep === 1 ? 'Configure Variants' : 'Generate Matrix'} <ChevronRight size={18} />
                  </button>
                ) : (
-                <button type="button" className={styles.wizardNextBtn} disabled={isGenerating} onClick={handleSaveProduct}>
+                <button type="button" className={styles.wizardNextBtn} disabled={isGenerating} onClick={handleSaveProduct} style={{ background: '#000' }}>
                    {isGenerating ? 'Saving...' : 'Publish to Catalog'}
                  </button>
                )}
@@ -1918,6 +2284,123 @@ export default function ProductsPage() {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Component Management Modal */}
+      {isComponentModalOpen && activeVariantForComponents && (
+        <div className={styles.modalOverlay}>
+          <div className={styles.minimalModal} style={{ maxWidth: '700px', padding: '0', borderRadius: '4px', overflow: 'hidden' }}>
+            <div style={{ padding: '1.5rem', background: '#f8fafc', borderBottom: '1px solid #e2e8f0', position: 'relative' }}>
+              <h3 style={{ margin: 0, fontSize: '1.1rem', fontWeight: 700, color: '#1e293b' }}>Manage Composite Components</h3>
+              <p style={{ margin: '4px 0 0', fontSize: '0.75rem', color: '#64748b' }}>
+                Define sub-items for <strong>{activeVariantForComponents.sku}</strong>
+              </p>
+              <button className={styles.closeBtn} onClick={() => setIsComponentModalOpen(false)} style={{ top: '1.25rem', right: '1.25rem' }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            <div style={{ padding: '1.5rem' }}>
+
+            <div style={{ marginBottom: '1.5rem' }}>
+              <label style={{ fontSize: '0.7rem', fontWeight: 600, color: 'var(--text-secondary)', display: 'block', marginBottom: '8px' }}>
+                ADD COMPONENT
+              </label>
+              <SearchableSelect
+                value=""
+                placeholder="Search catalog for component..."
+                options={products.flatMap(p => (p.variants || []).map((v: any) => ({
+                  value: v.id,
+                  label: `${p.name} (${v.sku})`,
+                  keywords: [p.name, v.sku]
+                })))}
+                onChange={(variantId) => {
+                  const variant = products.flatMap(p => p.variants || []).find((v: any) => v.id === variantId);
+                  const product = products.find(p => p.variants?.some((v: any) => v.id === variantId));
+                  const stock = variant?.stock_data?.reduce((sum: number, s: any) => sum + (s.quantity || 0), 0) || 0;
+                  if (variant && !activeComponents.some(c => c.variant_id === variantId)) {
+                    setActiveComponents([...activeComponents, {
+                      variant_id: variantId,
+                      sku: variant.sku,
+                      name: product.name,
+                      quantity: 1,
+                      currentStock: stock,
+                      unit: product.unit || variant.attributes?.Unit || 'Nos'
+                    }]);
+                  }
+                }}
+              />
+            </div>
+
+            <div className={styles.componentList} style={{ maxHeight: '300px', overflowY: 'auto', border: '1px solid #f1f5f9', borderRadius: '4px' }}>
+              {activeComponents.length > 0 ? (
+                <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+                  <thead style={{ background: '#f8fafc', fontSize: '0.7rem', textAlign: 'left' }}>
+                    <tr>
+                      <th style={{ padding: '12px', color: '#64748b' }}>COMPONENT</th>
+                      <th style={{ padding: '12px', width: '100px', color: '#64748b' }}>STOCK</th>
+                      <th style={{ padding: '12px', width: '80px', color: '#64748b' }}>QTY/SET</th>
+                      <th style={{ padding: '12px', width: '40px' }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeComponents.map((comp, idx) => (
+                      <tr key={comp.variant_id} style={{ borderTop: '1px solid #f1f5f9' }}>
+                        <td style={{ padding: '12px' }}>
+                          <div style={{ fontSize: '0.85rem', fontWeight: 600, color: '#1e293b' }}>{comp.name}</div>
+                          <div style={{ fontSize: '0.7rem', color: '#64748b' }}>{comp.sku} ({comp.unit})</div>
+                        </td>
+                        <td style={{ padding: '12px', fontSize: '0.8rem', color: '#475569' }}>
+                           {comp.currentStock}
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <input
+                            type="number"
+                            value={comp.quantity}
+                            style={{ width: '100%', padding: '4px', fontSize: '0.8rem', border: '1px solid #e2e8f0' }}
+                            onChange={(e) => {
+                              const newComps = [...activeComponents];
+                              newComps[idx].quantity = parseFloat(e.target.value) || 0;
+                              setActiveComponents(newComps);
+                            }}
+                          />
+                        </td>
+                        <td style={{ padding: '8px 12px' }}>
+                          <button
+                            className={styles.miniBtn}
+                            style={{ color: '#ef4444' }}
+                            onClick={() => setActiveComponents(activeComponents.filter((_, i) => i !== idx))}
+                          >
+                            <Trash2 size={12} />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <div style={{ padding: '2rem', textAlign: 'center', color: 'var(--text-secondary)', fontSize: '0.8rem' }}>
+                  No sub-items defined yet.
+                </div>
+              )}
+            </div>
+
+            </div>
+
+            <div style={{ padding: '1.25rem 1.5rem', background: '#f8fafc', borderTop: '1px solid #e2e8f0', display: 'flex', justifyContent: 'flex-end', gap: '1rem' }}>
+              <button className={styles.wizardBackBtn} onClick={() => setIsComponentModalOpen(false)} style={{ background: 'white' }}>
+                Cancel
+              </button>
+              <button 
+                className={styles.wizardNextBtn} 
+                disabled={isSavingComponents}
+                onClick={saveComponents}
+                style={{ background: '#000' }}
+              >
+                {isSavingComponents ? 'Processing...' : 'Update Assembly'}
+              </button>
             </div>
           </div>
         </div>

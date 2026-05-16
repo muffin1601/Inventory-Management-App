@@ -32,14 +32,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
+async function checkRoles() {
+  console.log("Checking roles and permissions...");
+  const { data: roles, error } = await supabase.from('roles').select('*');
   if (error) {
-    console.error('Error:', error);
+    console.error('Roles Error:', error);
   } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+    console.log('Roles:', JSON.stringify(roles, null, 2));
   }
 }
 
-probe();
+checkRoles();

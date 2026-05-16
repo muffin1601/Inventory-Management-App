@@ -32,14 +32,36 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
+async function testInsert() {
+  console.log("Testing manual insert into boq_headers...");
+  
+  // Get a valid project ID
+  const { data: projects } = await supabase.from('projects').select('id').limit(1);
+  if (!projects || projects.length === 0) {
+    console.log("No projects found to test with.");
+    return;
+  }
+  const projectId = projects[0].id;
+  console.log("Using Project ID:", projectId);
+
+  const payload = {
+    project_id: projectId,
+    order_id: null,
+    after_index: 0,
+    text: "TEST HEADER " + new Date().toISOString()
+  };
+
+  const { data, error } = await supabase.from('boq_headers').insert(payload).select('*').single();
+  
   if (error) {
-    console.error('Error:', error);
+    console.error('Insert Error:', error.code, error.message, error.details);
   } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+    console.log('Insert Success:', data);
+    
+    // Clean up
+    await supabase.from('boq_headers').delete().eq('id', data.id);
+    console.log("Cleanup done.");
   }
 }
 
-probe();
+testInsert();

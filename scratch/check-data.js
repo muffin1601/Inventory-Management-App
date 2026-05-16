@@ -32,14 +32,14 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
+async function check() {
+  console.log("Checking boq_headers table...");
+  const { data, error } = await supabase.from('boq_headers').select('*').limit(5);
   if (error) {
-    console.error('Error:', error);
+    console.error('BOQ Headers Table Error:', error.code, error.message);
   } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+    console.log('BOQ Headers (first 5):', data);
   }
 }
 
-probe();
+check();

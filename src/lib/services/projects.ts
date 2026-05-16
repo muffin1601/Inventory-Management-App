@@ -439,12 +439,12 @@ export const projectsService = {
       .order('after_index', { ascending: true })
       .order('created_at', { ascending: true });
 
-    query = orderId === 'master' ? query.is('order_id', null) : query.eq('order_id', orderId);
+    query = (!orderId || orderId === 'master') ? query.is('order_id', null) : query.eq('order_id', orderId);
     const { data, error } = await query;
 
     if (error) {
       if (isMissingTableError(error, 'boq_headers')) return [];
-      console.error('Failed to fetch BOQ headers:', error);
+      console.error('Failed to fetch BOQ headers:', JSON.stringify(error, null, 2));
       throw new Error(`Failed to fetch BOQ headers: ${error.message}`);
     }
 
@@ -464,14 +464,14 @@ export const projectsService = {
 
     const payload = {
       project_id: input.projectId,
-      order_id: input.orderId === 'master' ? null : input.orderId,
+      order_id: (!input.orderId || input.orderId === 'master') ? null : input.orderId,
       after_index: input.afterIndex,
       text,
     };
 
     const { data, error } = await supabase.from('boq_headers').insert(payload).select('*').single();
     if (error) {
-      console.error('Failed to create BOQ header:', error);
+      console.error('Failed to create BOQ header:', JSON.stringify(error, null, 2));
       throw new Error(`Failed to create BOQ header: ${error.message}`);
     }
 
@@ -485,7 +485,6 @@ export const projectsService = {
       throw new Error(`Failed to delete BOQ header: ${error.message}`);
     }
   },
-
   async listProjectOrders(projectId: string): Promise<ProjectOrderRecord[]> {
     const { data, error } = await supabase
       .from('project_orders')

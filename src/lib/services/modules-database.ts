@@ -1454,14 +1454,16 @@ export const modulesService = {
       if (finalProjectId) {
         try {
           for (const item of items) {
-            await updateBoqDelivered({
-              projectId: finalProjectId,
-              boqItemId: item.boq_item_id,
-              variantId: item.variant_id,
-              itemName: item.name,
-              quantity: Number(item.quantity),
-              direction: 1,
-            });
+            if (!(item as any).skipBoqUpdate) {
+              await updateBoqDelivered({
+                projectId: finalProjectId,
+                boqItemId: item.boq_item_id,
+                variantId: item.variant_id,
+                itemName: item.name,
+                quantity: Number(item.quantity),
+                direction: 1,
+              });
+            }
             await dispatchStock({
               variantId: item.variant_id,
               warehouseId: item.warehouse_id,

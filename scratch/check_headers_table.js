@@ -1,4 +1,3 @@
-
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
@@ -32,14 +31,13 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
+async function check() {
+  const { error } = await supabase.from('boq_headers').select('id').limit(1);
   if (error) {
-    console.error('Error:', error);
+    console.log('Error:', error.message, 'Code:', error.code);
   } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+    console.log('Table boq_headers exists.');
   }
 }
 
-probe();
+check();

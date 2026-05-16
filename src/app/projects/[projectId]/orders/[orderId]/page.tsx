@@ -45,6 +45,7 @@ export default function OrderBoqPage() {
   const [order, setOrder] = React.useState<ProjectOrderRecord | null>(null);
   const [items, setItems] = React.useState<BoqItemRecord[]>([]);
   const [products, setProducts] = React.useState<any[]>([]);
+  const [componentsMap, setComponentsMap] = React.useState<Record<string, any[]>>({});
   const [isLoading, setIsLoading] = React.useState(true);
 
   // Form for new row
@@ -211,6 +212,23 @@ export default function OrderBoqPage() {
           setOrder(currentOrder);
           const itemsResult = await projectsService.listBoqItemsForOrder(projectId, orderId);
           setItems(itemsResult);
+
+          // Fetch components for variants that are SETs
+          const setVariantIds = Array.from(new Set(
+            itemsResult
+              .map(item => findVariantForBoqItem(item)?.id)
+              .filter(id => {
+                if (!id) return false;
+                const v = variants.find(e => e.variant.id === id);
+                const u = (v?.unit || '').toUpperCase();
+                return u === 'SET' || u === 'SETS';
+              }) as string[]
+          ));
+          
+          if (setVariantIds.length > 0) {
+            const comps = await inventoryService.getBatchVariantComponents(setVariantIds);
+            setComponentsMap(comps);
+          }
         }
       }
       const dbHeaders = await projectsService.listBoqHeaders(projectId, orderId);
@@ -269,7 +287,7 @@ export default function OrderBoqPage() {
   };
 
   const addHeader = async (text: string) => {
-    const afterIndex = items.length - 1;
+    const afterIndex = items.length > 0 ? items.length - 1 : 0;
     try {
       const created = await projectsService.createBoqHeader({
         projectId,
@@ -351,15 +369,21 @@ export default function OrderBoqPage() {
     return { totalStock, promisedThis, promisedOther, free, cards };
   }, [bulkCards]);
 
-  const openAddItem = () => {
+  const resetInlineRow = () => {
     setItemName('');
     setManufacturer('');
     setQty('');
     setUnit('Nos');
+    setHeaderText('');
     setSelectedCardKey('');
     setSelectedVariantId('');
     setSelectedWarehouseId('');
-    setAddItemDialogOpen(true);
+  };
+
+  const openAddItem = () => {
+    resetInlineRow();
+    setAddRowType('item');
+    setShowAddRow(true);
   };
 
   const handleAddItem = async () => {
@@ -742,183 +766,197 @@ export default function OrderBoqPage() {
     }
   };
 
-  const handlePdfDownload = async () => {
+  const handlePdfDownload = () => {
     const rows = buildRows();
     const projectName = project?.name || 'Project';
     const clientName = project?.client_name || '';
     const orderName = order?.order_number || 'BOQ';
-    const fileBase = `${orderName.replace(/\s+/g, '_')}_${projectName.replace(/\s+/g, '_')}`;
-    const logo = await loadPdfLogo();
+    const clientAddress = project?.delivery_address || 'No address provided';
+    const dateStr = new Date().toLocaleDateString('en-IN', { day: '2-digit', month: 'short', year: 'numeric' });
 
-    const pages: string[] = [];
-    let content = '';
-    let y = 806;
-    const margin = 32;
-    const columns = {
-      sno: 36,
-      item: 66,
-      manufacturer: 280,
-      unit: 382,
-      qty: 430,
-      delivered: 482,
-      balance: 540,
-    };
-    const itemRowHeight = 24;
-    const sectionRowHeight = 24;
-
-    const add = (command: string) => {
-      content += `${command}\n`;
-    };
-    const text = (x: number, nextY: number, value: unknown, size = 9, bold = false, fill = '0 0 0') => {
-      add(`${fill} rg BT /${bold ? 'F2' : 'F1'} ${size} Tf ${x} ${nextY} Td (${sanitizePdfText(value)}) Tj ET 0 0 0 rg`);
-    };
-    const rightText = (x: number, nextY: number, value: unknown, size = 9) => {
-      const safe = String(value ?? '');
-      text(x - Math.min(safe.length * size * 0.45, 34), nextY, safe, size);
-    };
-    const line = (x1: number, y1: number, x2: number, y2: number) => {
-      add(`0.78 0.82 0.88 RG ${x1} ${y1} m ${x2} ${y2} l S`);
-    };
-    const fillRect = (x: number, rectY: number, width: number, height: number, shade: string) => {
-      add(`${shade} rg ${x} ${rectY} ${width} ${height} re f 0 0 0 rg`);
-    };
-    const strokeRect = (x: number, rectY: number, width: number, height: number, shade = '0.78 0.82 0.88') => {
-      add(`${shade} RG ${x} ${rectY} ${width} ${height} re S`);
-    };
-    const drawLogo = () => {
-      if (!logo) {
-        fillRect(margin, y - 24, 12, 24, '0.72 0.08 0.07');
-        text(margin + 18, y - 5, 'WATCON', 17, true);
-        text(margin + 20, y - 18, 'International', 8);
-        return;
-      }
-
-      const logoWidth = 150;
-      const logoHeight = Math.min(34, logoWidth * (logo.height / logo.width));
-      add(`q ${logoWidth} 0 0 ${logoHeight} ${margin} ${y - logoHeight + 2} cm /Logo Do Q`);
-    };
-
-    const finishPage = () => {
-      pages.push(content);
-      content = '';
-    };
-    const drawHeader = () => {
-      y = 806;
-      drawLogo();
-      text(390, y - 3, 'BILL OF QUANTITIES', 13, true);
-      text(390, y - 18, truncatePdfText(orderName, 30), 9);
-
-      y -= 45;
-      fillRect(margin, y - 18, 531, 26, '0.97 0.98 0.99');
-      strokeRect(margin, y - 18, 531, 26);
-      text(margin + 10, y - 2, `Project: ${projectName}`, 9, true);
-      if (clientName) text(230, y - 2, `Client: ${clientName}`, 9, true);
-      text(430, y - 2, `Date: ${new Date().toLocaleDateString('en-IN')}`, 9, true);
-
-      y -= 36;
-      fillRect(margin, y - 6, 531, 24, '0.12 0.16 0.22');
-      text(columns.sno, y + 1, 'S.NO', 8, true, '1 1 1');
-      text(columns.item, y + 1, 'DESCRIPTION OF ITEM', 8, true, '1 1 1');
-      text(columns.manufacturer, y + 1, 'MANUFACTURER', 8, true, '1 1 1');
-      text(columns.unit, y + 1, 'UNIT', 8, true, '1 1 1');
-      text(columns.qty - 18, y + 1, 'QTY', 8, true, '1 1 1');
-      text(columns.delivered - 24, y + 1, 'DELIV.', 8, true, '1 1 1');
-      text(columns.balance - 20, y + 1, 'BAL.', 8, true, '1 1 1');
-      y -= 25;
-    };
-    const newPage = () => {
-      if (content) finishPage();
-      drawHeader();
-    };
-    const ensureSpace = (height: number) => {
-      if (y - height < 42) newPage();
-    };
-
-    drawHeader();
-    rows.forEach((row) => {
+    let tableRows = '';
+    for (const row of rows) {
       if (row.type === 'header') {
-        ensureSpace(sectionRowHeight);
-        fillRect(margin, y - 7, 531, sectionRowHeight, '0.89 0.93 1');
-        text(columns.sno, y + 2, truncatePdfText(row.text, 70).toUpperCase(), 9, true);
-        y -= sectionRowHeight;
-        return;
+        tableRows += `<tr class="section-header"><td colspan="7">${row.text.toUpperCase()}</td></tr>`;
+      } else {
+        const balance = Math.max((row.item.quantity || 0) - (row.item.delivered || 0), 0);
+        const variantId = findVariantForBoqItem(row.item)?.id;
+        const components = variantId ? componentsMap[variantId] : [];
+        
+        let componentHtml = '';
+        if (components && components.length > 0) {
+          componentHtml = `<div style="margin-top:4px;font-size:8.5px;color:#475569;border-left:1.5px solid #0c4a6e;padding-left:8px;font-style:italic">
+            ${components.map(c => `• ${c.name} (${c.sku}) — ${c.quantity * (row.item.quantity || 0)} ${c.unit}`).join('<br>')}
+          </div>`;
+        }
+
+        tableRows += `<tr>
+          <td style="text-align:center;color:#64748b;width:40px">${row.index}</td>
+          <td class="item-name">
+            ${row.item.item_name}
+            ${componentHtml}
+          </td>
+          <td style="color:#475569">${getItemManufacturer(row.item)}</td>
+          <td style="color:#475569">${row.item.unit || 'Nos'}</td>
+          <td style="text-align:right;font-weight:600">${row.item.quantity}</td>
+          <td style="text-align:right;color:#64748b">${row.item.delivered || 0}</td>
+          <td style="text-align:right;font-weight:700;color:${balance > 0 ? '#111111ff' : '#0f172a'}">${balance}</td>
+        </tr>`;
       }
-
-      ensureSpace(itemRowHeight);
-      const balance = Math.max((row.item.quantity || 0) - (row.item.delivered || 0), 0);
-      const rowTextY = y - 4;
-      text(columns.sno, rowTextY, row.index, 8);
-      text(columns.item, rowTextY, truncatePdfText(getItemDisplayName(row.item), 42), 8, true);
-      text(columns.manufacturer, rowTextY, truncatePdfText(getItemManufacturer(row.item), 18), 8);
-      text(columns.unit, rowTextY, truncatePdfText(row.item.unit || 'Nos', 10), 8);
-      rightText(columns.qty, rowTextY, row.item.quantity, 8);
-      rightText(columns.delivered, rowTextY, row.item.delivered || 0, 8);
-      rightText(columns.balance, rowTextY, balance, 8);
-      y -= itemRowHeight;
-      line(margin, y + 6, 563, y + 6);
-    });
-    y -= 18;
-    text(margin, y, `Generated on ${new Date().toLocaleString('en-IN')}`, 8);
-    finishPage();
-
-    const encoder = new TextEncoder();
-    type PdfPart = string | Uint8Array;
-    const objects: PdfPart[][] = [
-      ['<< /Type /Catalog /Pages 2 0 R >>'],
-      [''],
-      ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'],
-      ['<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica-Bold >>'],
-    ];
-
-    let logoObjectId: number | null = null;
-    if (logo) {
-      logoObjectId = objects.length + 1;
-      objects.push([
-        `<< /Type /XObject /Subtype /Image /Width ${logo.width} /Height ${logo.height} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${logo.bytes.length} >>\nstream\n`,
-        logo.bytes,
-        '\nendstream',
-      ]);
     }
 
-    const firstPageObjectId = objects.length + 1;
-    objects[1] = [`<< /Type /Pages /Kids [${pages.map((_, index) => `${firstPageObjectId + index * 2} 0 R`).join(' ')}] /Count ${pages.length} >>`];
-    const xObjectResources = logoObjectId ? `/XObject << /Logo ${logoObjectId} 0 R >> ` : '';
-    pages.forEach((pageContent, index) => {
-      const pageObjectId = firstPageObjectId + index * 2;
-      const contentObj = pageObjectId + 1;
-      objects.push([`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 595 842] /Resources << ${xObjectResources}/Font << /F1 3 0 R /F2 4 0 R >> >> /Contents ${contentObj} 0 R >>`]);
-      objects.push([`<< /Length ${encoder.encode(pageContent).length} >>\nstream\n${pageContent}endstream`]);
-    });
+    const htmlContent = `
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>${orderName} - ${projectName}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --primary: #1f1f1fff;
+      --accent: #505050ff;
+      --border: #808080ff;
+      --text-main: #242424ff;
+      --text-muted: #858585ff;
+      --row-bg: #ecececff;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body { 
+      font-family: 'Montserrat', sans-serif; 
+      color: var(--text-main); 
+      line-height: 1.5; 
+      padding: 40px;
+      font-size: 11px;
+      background: white;
+    }
+    .header-top { display: flex; justify-content: space-between; margin-bottom: 20px; align-items: center; }
+    .logo-img { height: 60px; width: auto; object-fit: contain; }
+    
+    .doc-title-box { background: var(--primary); color: white; padding: 16px 32px; text-align: right; border-radius: 0; }
+    .doc-title-box h1 { font-size: 16px; font-weight: 800; margin-bottom: 4px; letter-spacing: 0.05em; }
+    .doc-title-box p { font-size: 10px; opacity: 0.9; font-weight: 500; }
+    
+    .company-details { margin-bottom: 35px; font-size: 10px; color: var(--text-muted); line-height: 1.6; }
+    .company-details strong { color: var(--primary); display: block; font-size: 12px; margin-bottom: 4px; font-weight: 700; }
 
-    const chunks: PdfPart[] = ['%PDF-1.4\n'];
-    const offsets: number[] = [0];
-    let byteLength = encoder.encode(chunks[0] as string).length;
-    const append = (part: PdfPart) => {
-      chunks.push(part);
-      byteLength += typeof part === 'string' ? encoder.encode(part).length : part.length;
+    .info-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; margin-bottom: 35px; }
+    .info-box { border: 1px solid var(--border); border-radius: 0; overflow: hidden; }
+    .info-box-header { background: var(--row-bg); padding: 8px 14px; border-bottom: 1px solid var(--border); font-size: 8px; font-weight: 800; color: var(--primary); text-transform: uppercase; letter-spacing: 0.05em; }
+    .info-box-content { padding: 14px; }
+    .info-box-content strong { display: block; font-size: 12px; margin-bottom: 6px; color: var(--primary); font-weight: 700; }
+    .info-box-content p { font-size: 10px; color: var(--text-muted); line-height: 1.5; }
+
+    table { width: 100%; border-collapse: collapse; margin-top: 10px; border: 1px solid var(--border); }
+    th { background: var(--primary); color: white; padding: 12px 14px; font-size: 9px; font-weight: 700; text-transform: uppercase; text-align: left; letter-spacing: 0.05em; }
+    th:nth-child(n+5) { text-align: right; }
+    td { padding: 14px 14px; border-bottom: 1px solid var(--border); vertical-align: top; font-size: 10.5px; }
+    tr:nth-child(even) { background-color: #fcfdfe; }
+    .item-name { font-weight: 600; max-width: 280px; line-height: 1.5; color: var(--primary); }
+    .section-header td { background: var(--row-bg); font-weight: 800; color: var(--primary); font-size: 10px; padding: 10px 14px; text-transform: uppercase; letter-spacing: 0.05em; border-top: 2px solid var(--primary); }
+
+    .signatures { display: grid; grid-template-columns: 1fr 1fr; gap: 120px; margin-top: 80px; page-break-inside: avoid; }
+    .sig-box { border-top: 2px solid var(--primary); padding-top: 12px; }
+    .sig-box p { font-size: 10px; font-weight: 700; margin-bottom: 4px; color: var(--primary); }
+    .sig-box span { font-size: 9px; color: var(--text-muted); font-weight: 500; }
+
+    .footer { margin-top: 60px; border-top: 1px solid var(--border); padding-top: 15px; font-size: 9px; color: var(--text-muted); text-align: right; font-weight: 500; }
+
+    @media print {
+      body { padding: 0; }
+      @page { margin: 1.5cm; }
+      .doc-title-box { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      th { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+      .section-header td { -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header-top">
+    <img src="/logo1.png" alt="Company Logo" class="logo-img" onerror="this.style.display='none'; document.getElementById('text-logo').style.display='block';">
+    <div id="text-logo" style="display:none; font-size:24px; font-weight:800; color:var(--primary);">WATCON</div>
+    <div class="doc-title-box">
+      <h1>BILL OF QUANTITIES</h1>
+      <p># ${orderName} | ${dateStr}</p>
+    </div>
+  </div>
+
+  <div class="company-details">
+    <strong>Watcon International Pvt. Ltd.</strong>
+    S-36, Okhla Phase II, Pocket S, Okhla Phase II, Okhla Industrial Estate, New Delhi, Delhi 110020<br>
+    www.watcon.in
+  </div>
+
+  <div class="info-grid">
+    <div class="info-box">
+      <div class="info-box-header">Bill To / Site Address</div>
+      <div class="info-box-content">
+        <strong>${clientName}</strong>
+        <p>${clientAddress}</p>
+      </div>
+    </div>
+    <div class="info-box">
+      <div class="info-box-header">Project Information</div>
+      <div class="info-box-content">
+        <strong>${projectName}</strong>
+        <p>Project Code: ${project?.code || 'N/A'}<br>Status: ${project?.status || 'Active'}</p>
+      </div>
+    </div>
+  </div>
+
+  <table>
+    <thead>
+      <tr>
+        <th>S.No</th>
+        <th>Description of Item</th>
+        <th>Manufacturer</th>
+        <th>Unit</th>
+        <th style="text-align:right">Qty</th>
+        <th style="text-align:right">Deliv.</th>
+        <th style="text-align:right">Balance</th>
+      </tr>
+    </thead>
+    <tbody>
+      ${tableRows}
+    </tbody>
+  </table>
+
+  <div class="signatures">
+    <div class="sig-box">
+      <p>Receiver's Signature</p>
+      <span>(Stamp & Date)</span>
+    </div>
+    <div class="sig-box" style="text-align: right;">
+      <p>For Watcon International</p>
+      <span>Authorized Signatory</span>
+    </div>
+  </div>
+
+  <div class="footer">
+    Generated on ${new Date().toLocaleString('en-IN')} | Page 1 of 1
+  </div>
+
+  <script>
+    window.onload = () => {
+      // Ensure images are loaded
+      setTimeout(() => {
+        window.print();
+        window.close();
+      }, 800);
     };
-    objects.forEach((object, index) => {
-      offsets.push(byteLength);
-      append(`${index + 1} 0 obj\n`);
-      object.forEach(append);
-      append('\nendobj\n');
-    });
-    const xrefStart = byteLength;
-    append(`xref\n0 ${objects.length + 1}\n0000000000 65535 f \n`);
-    offsets.slice(1).forEach((offset) => {
-      append(`${String(offset).padStart(10, '0')} 00000 n \n`);
-    });
-    append(`trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xrefStart}\n%%EOF`);
+  </script>
+</body>
+</html>
+    `;
 
-    const blob = new Blob(chunks as BlobPart[], { type: 'application/pdf' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `${fileBase}.pdf`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const printWindow = window.open('', '_blank');
+    if (printWindow) {
+      printWindow.document.write(htmlContent);
+      printWindow.document.close();
+    }
     setShowDownload(false);
-    ui.showToast('PDF downloaded.', 'success');
   };
 
   // Download formatted table as HTML
@@ -1074,16 +1112,6 @@ export default function OrderBoqPage() {
             <button className={styles.secondaryAction} onClick={() => setShowDownload(true)} disabled={isBulkEditing}>
               <Download size={14} /> Save & Download
             </button>
-            <button
-              className={styles.secondaryAction}
-              onClick={() => { setAddRowType('header'); setShowAddRow(true); }}
-              disabled={isBulkEditing}
-            >
-              <Heading1 size={14} /> Add Header
-            </button>
-            <button className={styles.primaryAction} onClick={openAddItem} disabled={isBulkEditing}>
-              <Plus size={14} /> Add Row
-            </button>
           </div>
         </div>
       </div>
@@ -1123,7 +1151,20 @@ export default function OrderBoqPage() {
                         value={bulkEditRows[row.item.id]?.item_name || ''}
                         onChange={(e) => updateBulkEditRow(row.item.id, 'item_name', e.target.value)}
                       />
-                    ) : getItemDisplayName(row.item)}
+                     ) : getItemDisplayName(row.item)}
+                    
+                    {!isBulkEditing && (() => {
+                      const vId = findVariantForBoqItem(row.item)?.id;
+                      const comps = vId ? componentsMap[vId] : [];
+                      if (!comps || comps.length === 0) return null;
+                      return (
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '4px', borderLeft: '2px solid #e2e8f0', paddingLeft: '8px' }}>
+                          {comps.map(c => (
+                            <div key={c.variant_id}>• {c.name} ({c.sku}) — {(c.quantity * (row.item.quantity || 0)).toFixed(2)} {c.unit}</div>
+                          ))}
+                        </div>
+                      );
+                    })()}
                   </td>
                   <td>
                     {isBulkEditing ? (
@@ -1228,26 +1269,86 @@ export default function OrderBoqPage() {
               )
             )}
 
-            {showAddRow && addRowType === 'header' && (
-              <tr className={styles.addRow}>
-                <td><span className={styles.headerBadge}>H</span></td>
-                <td colSpan={5}>
-                  <input
-                    className={styles.inlineInput}
-                    placeholder="Section heading text..."
-                    value={headerText}
-                    onChange={e => setHeaderText(e.target.value)}
-                    onKeyDown={e => e.key === 'Enter' && handleAddItem()}
-                    autoFocus
-                  />
+            {showAddRow && (
+              <tr className={addRowType === 'header' ? styles.sectionHeaderRow : styles.addRow}>
+                <td style={{ verticalAlign: 'top' }}>
+                  {addRowType === 'header' ? <span className={styles.headerBadge}>H</span> : (items.length + 1)}
+                </td>
+                <td className={styles.searchableTd}>
+                  {addRowType === 'header' ? (
+                    <input
+                      className={styles.inlineInput}
+                      placeholder="Section heading text..."
+                      value={headerText}
+                      onChange={e => setHeaderText(e.target.value)}
+                      onKeyDown={e => e.key === 'Enter' && handleAddItem()}
+                      autoFocus
+                    />
+                  ) : (
+                    <>
+                      <SearchableSelect
+                        options={friendlyProductOptions}
+                        value={selectedCardKey}
+                        onChange={handleProductSelect}
+                        placeholder="Search items by name, SKU, or warehouse..."
+                        searchPlaceholder="Type to filter..."
+                      />
+                      {selectedCard && (
+                        <div className={styles.selectionMeta}>
+                          <div className={styles.selectionMetaGrid}>
+                            <div>Stock: <strong>{selectedCard.stock}</strong></div>
+                            <div>Free: <strong style={{ color: '#059669' }}>{Math.max(selectedCard.free, 0)}</strong></div>
+                            <div>This Project: <strong style={{ color: '#f59e0b' }}>{selectedCard.promisedProject}</strong></div>
+                            <div>Other Projects: <strong style={{ color: '#64748b' }}>{selectedCard.promisedOther}</strong></div>
+                          </div>
+                          <div style={{ marginTop: '0.45rem', fontSize: '0.65rem', color: '#475569', fontWeight: 600, borderTop: '1px solid #e2e8f0', paddingTop: '0.35rem' }}>
+                            WAREHOUSE: {selectedCard.warehouseName.toUpperCase()}
+                          </div>
+                        </div>
+                      )}
+                    </>
+                  )}
+                </td>
+                <td style={{ verticalAlign: 'top' }}>
+                  {addRowType === 'item' && (
+                    <input
+                      className={styles.tableInput}
+                      placeholder="Manufacturer"
+                      value={manufacturer}
+                      onChange={e => setManufacturer(e.target.value)}
+                    />
+                  )}
+                </td>
+                <td style={{ verticalAlign: 'top' }}>
+                  {addRowType === 'item' && (
+                    <input
+                      className={styles.tableInput}
+                      placeholder="Unit"
+                      value={unit}
+                      onChange={e => setUnit(e.target.value)}
+                    />
+                  )}
+                </td>
+                <td className={styles.numericCell} style={{ verticalAlign: 'top' }}>
+                  {addRowType === 'item' && (
+                    <input
+                      className={`${styles.tableInput} ${styles.tableNumberInput}`}
+                      type="number"
+                      min="1"
+                      placeholder="Qty"
+                      value={qty}
+                      onChange={e => setQty(e.target.value)}
+                    />
+                  )}
                 </td>
                 <td></td>
-                <td className={styles.actionsCell}>
+                <td></td>
+                <td className={styles.actionsCell} style={{ verticalAlign: 'top' }}>
                   <div style={{ display: 'flex', gap: '0.25rem', justifyContent: 'flex-end' }}>
                     <button className={styles.saveBtn} onClick={handleAddItem} disabled={isSaving}>
                       <Save size={12} />
                     </button>
-                    <button className={styles.cancelBtn} onClick={() => setShowAddRow(false)}>
+                    <button className={styles.cancelBtn} onClick={() => { setShowAddRow(false); resetInlineRow(); }}>
                       <X size={12} />
                     </button>
                   </div>
@@ -1257,7 +1358,26 @@ export default function OrderBoqPage() {
           </tbody>
         </table>
         {items.length === 0 && !showAddRow && (
-          <div className={styles.emptyTable}>No items added yet.</div>
+          <div className={styles.emptyTable}>No items added yet. Click 'Add Row' below to start.</div>
+        )}
+      </div>
+
+      <div className={styles.tableFooterActions}>
+        {!isBulkEditing && (
+          <div className={styles.footerBtnGroup}>
+            <button
+              className={styles.secondaryAction}
+              onClick={() => { setAddRowType('header'); setShowAddRow(true); resetInlineRow(); }}
+            >
+              <Plus size={14} /> Add Header
+            </button>
+            <button
+              className={styles.primaryAction}
+              onClick={() => { setAddRowType('item'); setShowAddRow(true); resetInlineRow(); }}
+            >
+              <Plus size={14} /> Add Row
+            </button>
+          </div>
         )}
       </div>
 
@@ -1367,26 +1487,20 @@ export default function OrderBoqPage() {
                 <div className={styles.formSection}>
                   <div className={styles.field}>
                     <label className={styles.label}>Item Name *</label>
-                    <input className={styles.input} value={editItemName} onChange={(e) => setEditItemName(e.target.value)} />
+                    <input className={styles.input} value={editItemName} readOnly style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed' }} />
                   </div>
                   <div className={styles.field}>
                     <label className={styles.label}>Manufacturer</label>
-                    <input className={styles.input} value={editManufacturer} onChange={(e) => setEditManufacturer(e.target.value)} />
+                    <input className={styles.input} value={editManufacturer} readOnly style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed' }} />
                   </div>
                   <div className={styles.fieldRow}>
                     <div className={styles.field}>
-                      <label className={styles.label}>Unit *</label>
-                      <select className={styles.select} value={editUnit} onChange={(e) => setEditUnit(e.target.value)}>
-                        <option value="Nos">Nos</option>
-                        <option value="Sets">Sets</option>
-                        <option value="Pcs">Pcs</option>
-                        <option value="Mtrs">Mtrs</option>
-                        <option value="Kgs">Kgs</option>
-                      </select>
+                      <label className={styles.label}>Unit</label>
+                      <input className={styles.input} value={editUnit} readOnly style={{ backgroundColor: '#f1f5f9', cursor: 'not-allowed' }} />
                     </div>
                     <div className={styles.field}>
                       <label className={styles.label}>Quantity *</label>
-                      <input className={styles.input} type="number" min="1" value={editQty} onChange={(e) => setEditQty(e.target.value)} />
+                      <input className={styles.input} type="number" min="1" value={editQty} onChange={(e) => setEditQty(e.target.value)} autoFocus />
                     </div>
                   </div>
                   <div className={styles.field}>

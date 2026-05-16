@@ -1,4 +1,3 @@
-
 const fs = require('fs');
 const path = require('path');
 const { createClient } = require('@supabase/supabase-js');
@@ -32,14 +31,16 @@ const supabase = createClient(
   process.env.SUPABASE_SERVICE_ROLE_KEY
 );
 
-async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
-  if (error) {
-    console.error('Error:', error);
-  } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+async function check() {
+  const tables = ['projects', 'project_orders', 'user_profiles', 'roles'];
+  for (const t of tables) {
+    const { error } = await supabase.from(t).select('id').limit(1);
+    if (error) {
+      console.log(`Table ${t} error: ${error.message} (${error.code})`);
+    } else {
+      console.log(`Table ${t} exists.`);
+    }
   }
 }
 
-probe();
+check();

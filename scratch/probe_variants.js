@@ -33,12 +33,15 @@ const supabase = createClient(
 );
 
 async function probe() {
-  const { data, error } = await supabase.from('products').select('*').limit(1);
-  if (error) {
-    console.error('Error:', error);
+  // First insert a product to link a variant to
+  const { data: p } = await supabase.from('products').insert({ name: 'test_p' }).select().single();
+  
+  const { data: v, error: vError } = await supabase.from('variants').insert({ product_id: p.id, sku: 'TEST-SKU' }).select().single();
+  if (vError) {
+    console.error('Variant Error:', vError);
   } else {
-    console.log('Sample product:', data[0]);
-    console.log('Columns:', Object.keys(data[0] || {}));
+    console.log('Sample variant:', v);
+    console.log('Columns:', Object.keys(v));
   }
 }
 

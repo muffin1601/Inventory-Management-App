@@ -43,6 +43,7 @@ export default function ChallansPage() {
   const [dispatchItems, setDispatchItems] = useState<any[]>([]);
   const [loadingBoq, setLoadingBoq] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [componentsMap, setComponentsMap] = useState<Record<string, any[]>>({});
   const [isSaving, setIsSaving] = useState(false);
   const [newChallan, setNewChallan] = useState<Partial<Challan>>({
     status: 'ISSUED',
@@ -166,6 +167,33 @@ export default function ChallansPage() {
       });
       setDispatchItems(processedItems);
 
+      // Fetch components for SET items
+      const setVariantIds = Array.from(new Set(
+        processedItems
+          .filter(i => {
+            const u = (i.unit || '').toUpperCase();
+            return u === 'SET' || u === 'SETS';
+          })
+          .map(i => i.variant_id)
+          .filter(Boolean)
+      )) as string[];
+
+      if (setVariantIds.length > 0) {
+        const comps = await inventoryService.getBatchVariantComponents(setVariantIds);
+        setComponentsMap(prev => ({ ...prev, ...comps }));
+        
+        // Attach components to dispatchItems
+        processedItems.forEach(item => {
+          const u = (item.unit || '').toUpperCase();
+          if ((u === 'SET' || u === 'SETS') && item.variant_id && comps[item.variant_id]) {
+            item.components = comps[item.variant_id].map((c: any) => ({
+              ...c,
+              dispatchQty: 0
+            }));
+          }
+        });
+      }
+
       await Promise.allSettled(
         processedItems
           .filter((item) => {
@@ -208,7 +236,25 @@ export default function ChallansPage() {
 
     const updated = [...dispatchItems];
     updated[index].dispatchQty = qty;
+    
+    // Auto-update components if it's a set
+    if (updated[index].components) {
+      updated[index].components = updated[index].components.map((c: any) => ({
+        ...c,
+        dispatchQty: Number((c.quantity * qty).toFixed(2))
+      }));
+    }
+    
     setDispatchItems(updated);
+  };
+
+  const updateComponentQty = (parentIdx: number, compIdx: number, val: string) => {
+    const qty = parseFloat(val) || 0;
+    const updated = [...dispatchItems];
+    if (updated[parentIdx].components) {
+      updated[parentIdx].components[compIdx].dispatchQty = qty;
+      setDispatchItems(updated);
+    }
   };
 
   const createChallan = async () => {
@@ -235,16 +281,37 @@ export default function ChallansPage() {
       }
       */
 
-      const itemsToDispatch = dispatchItems
-        .filter(i => i.dispatchQty > 0)
-        .map(i => ({
-          name: i.name,
-          quantity: i.dispatchQty,
-          unit: i.unit,
-          boq_item_id: i.boq_item_id || i.id,
-          variant_id: i.variant_id,
-          warehouse_id: i.warehouse_id
-        }));
+      const itemsToDispatch: any[] = [];
+      
+      dispatchItems.forEach(i => {
+        if (i.dispatchQty > 0) {
+          itemsToDispatch.push({
+            name: i.name,
+            quantity: i.dispatchQty,
+            unit: i.unit,
+            boq_item_id: i.boq_item_id || i.id,
+            variant_id: i.variant_id,
+            warehouse_id: i.warehouse_id
+          });
+        }
+        
+        // Add components if any have quantity
+        if (i.components) {
+          i.components.forEach((c: any) => {
+            if (c.dispatchQty > 0) {
+              itemsToDispatch.push({
+                name: `[Part of ${i.name}] ${c.name}`,
+                quantity: c.dispatchQty,
+                unit: c.unit,
+                boq_item_id: i.boq_item_id || i.id,
+                variant_id: c.variant_id,
+                warehouse_id: i.warehouse_id, // Use parent warehouse
+                skipBoqUpdate: true // Don't double count in BOQ
+              });
+            }
+          });
+        }
+      });
 
       if (itemsToDispatch.length === 0) {
         showToast('Select at least one item to dispatch', 'info');
@@ -677,7 +744,28 @@ export default function ChallansPage() {
                   {dispatchItems.map((item, idx) => (
                     <div key={item.id} className={styles.itemRow} style={{ gridTemplateColumns: '40px 2fr 1fr 1fr 80px 80px 80px 100px', fontSize: '0.8rem' }}>
                       <span style={{ color: 'var(--text-muted)' }}>{idx + 1}</span>
-                      <span style={{ fontWeight: 600 }}>{item.name}</span>
+                      <div style={{ display: 'flex', flexDirection: 'column' }}>
+                        <span style={{ fontWeight: 600 }}>{item.name}</span>
+                        {item.variant_id && item.components && item.components.length > 0 && (
+                          <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '8px', borderLeft: '2px solid #000', paddingLeft: '12px' }}>
+                            <div style={{ fontWeight: 800, textTransform: 'uppercase', marginBottom: '4px', color: '#000' }}>Edit Assembly Components</div>
+                            {item.components.map((c: any, cIdx: number) => (
+                              <div key={c.variant_id} style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+                                <span style={{ flex: 1 }}>• {c.name} ({c.sku})</span>
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                  <input 
+                                    type="number"
+                                    value={c.dispatchQty}
+                                    onChange={(e) => updateComponentQty(idx, cIdx, e.target.value)}
+                                    style={{ width: '50px', padding: '2px', border: '1px solid #e2e8f0', textAlign: 'right', fontSize: '0.65rem' }}
+                                  />
+                                  <span>{c.unit}</span>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
                       <span>{item.manufacturer || '-'}</span>
                       <span>{item.warehouse_name || 'Not linked'}</span>
                       <span style={{ textAlign: 'center' }}>{item.quantity}</span>
@@ -764,7 +852,16 @@ export default function ChallansPage() {
                 </div>
                 {viewingChallan.items.map(item => (
                   <div key={item.id} className={styles.itemRow} style={{ gridTemplateColumns: '2fr 1fr' }}>
-                    <span>{item.name}</span>
+                    <div style={{ display: 'flex', flexDirection: 'column' }}>
+                      <span>{item.name}</span>
+                      {item.variant_id && componentsMap[item.variant_id] && (
+                        <div style={{ fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '4px', borderLeft: '2px solid #e2e8f0', paddingLeft: '8px' }}>
+                          {componentsMap[item.variant_id].map(c => (
+                            <div key={c.variant_id}>• {c.name} ({c.sku}) x {c.quantity * (item.quantity || 0)} {c.unit}</div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
                     <span style={{ textAlign: 'right', fontWeight: 700 }}>{item.quantity} {item.unit}</span>
                   </div>
                 ))}

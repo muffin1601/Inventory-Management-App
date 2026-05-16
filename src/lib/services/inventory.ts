@@ -211,6 +211,93 @@ export const inventoryService = {
     });
   },
 
+  async getVariantComponents(variantId: string) {
+    const { data, error } = await supabase
+      .from('product_components')
+      .select(`
+        id,
+        quantity,
+        component:variants!product_components_component_variant_id_fkey(
+          id,
+          sku,
+          attributes,
+          product:products(id, name)
+        )
+      `)
+      .eq('parent_variant_id', variantId);
+    
+    if (error) throw error;
+    return (data || []).map(row => ({
+      id: row.id,
+      quantity: row.quantity,
+      variant_id: (row.component as any).id,
+      sku: (row.component as any).sku,
+      name: (row.component as any).product.name,
+      unit: (row.component as any).product.unit || (row.component as any).attributes?.Unit || (row.component as any).attributes?.unit || 'Nos'
+    }));
+  },
+
+  async getBatchVariantComponents(variantIds: string[]) {
+    if (variantIds.length === 0) return {};
+    const { data, error } = await supabase
+      .from('product_components')
+      .select(`
+        id,
+        parent_variant_id,
+        quantity,
+        component:variants!product_components_component_variant_id_fkey(
+          id,
+          sku,
+          attributes,
+          product:products(id, name)
+        )
+      `)
+      .in('parent_variant_id', variantIds);
+    
+    if (error) throw error;
+    
+    const map: Record<string, any[]> = {};
+    (data || []).forEach(row => {
+      const parentId = row.parent_variant_id;
+      if (!map[parentId]) map[parentId] = [];
+      map[parentId].push({
+        id: row.id,
+        quantity: row.quantity,
+        variant_id: (row.component as any).id,
+        sku: (row.component as any).sku,
+        name: (row.component as any).product.name,
+        unit: (row.component as any).product.unit || (row.component as any).attributes?.Unit || (row.component as any).attributes?.unit || 'Nos'
+      });
+    });
+    return map;
+  },
+
+  async updateVariantComponents(variantId: string, components: Array<{ variant_id: string, quantity: number }>) {
+    // 1. Delete existing
+    const { error: deleteError } = await supabase
+      .from('product_components')
+      .delete()
+      .eq('parent_variant_id', variantId);
+    
+    if (deleteError) throw deleteError;
+
+    if (components.length === 0) return true;
+
+    // 2. Insert new
+    const { error: insertError } = await supabase
+      .from('product_components')
+      .insert(
+        components.map(c => ({
+          parent_variant_id: variantId,
+          component_variant_id: c.variant_id,
+          quantity: c.quantity
+        }))
+      );
+    
+    if (insertError) throw insertError;
+    return true;
+  },
+
   async deleteProduct(productId: string) {
     const { error } = await supabase
       .from('products')
@@ -483,14 +570,18 @@ export const inventoryService = {
 
   async getUnits() {
     const products = await this.getProducts();
+    const normalize = (u: string) => (u || '').trim().toUpperCase().replace(/_/g, ' ');
+    
     const catalogUnits = products.flatMap((product: any) =>
       (product.variants || [])
-        .map((variant: any) => variant.attributes?.Unit || variant.attributes?.unit || product.unit)
+        .map((variant: any) => normalize(variant.attributes?.Unit || variant.attributes?.unit || product.unit))
         .filter(Boolean),
     );
 
-    const dbUnits = await getAppOptions('UNIT');
-    return Array.from(new Set([...DEFAULT_UNITS, ...dbUnits, ...catalogUnits])).sort((a, b) => a.localeCompare(b));
+    const dbUnits = (await getAppOptions('UNIT')).map(u => normalize(u));
+    return Array.from(new Set([...DEFAULT_UNITS.map(u => normalize(u)), ...dbUnits, ...catalogUnits]))
+      .filter(Boolean)
+      .sort((a, b) => a.localeCompare(b));
   },
 
   async createUnit(name: string) {
@@ -504,6 +595,32 @@ export const inventoryService = {
 
   async createReason(name: string) {
     return createAppOption('REASON', name);
+  },
+
+  async bulkAdjustStock(adjustments: Array<{ variant_id: string, warehouse_id?: string, quantity: number, notes?: string }>) {
+    for (const adj of adjustments) {
+      if (adj.quantity === 0) continue;
+      
+      let whId = adj.warehouse_id;
+      if (!whId) {
+        const { data: inv } = await supabase.from('inventory').select('warehouse_id').eq('variant_id', adj.variant_id).limit(1).maybeSingle();
+        if (inv) whId = inv.warehouse_id;
+        else {
+          const { data: wh } = await supabase.from('warehouses').select('id').limit(1).maybeSingle();
+          whId = wh?.id;
+        }
+      }
+      
+      if (whId) {
+        await this.recordMovement({
+          variant_id: adj.variant_id,
+          warehouse_id: whId,
+          type: 'ADJUSTMENT',
+          quantity: adj.quantity,
+          notes: adj.notes || 'Bulk adjustment from SET configuration'
+        });
+      }
+    }
   },
 
   async recordMovement(movement: {
