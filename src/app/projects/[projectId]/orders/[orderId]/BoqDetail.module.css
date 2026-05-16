@@ -274,8 +274,8 @@
 @media print {
   .noPrint { display: none !important; }
   .container { padding: 0; }
-  .table th { background: #eee !important; -webkit-print-color-adjust: exact; }
-  .sectionHeaderRow { background: #e8f0fe !important; -webkit-print-color-adjust: exact; }
+  .table th { background: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  .sectionHeaderRow { background: #e8f0fe !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
 }
 
 .overlay {

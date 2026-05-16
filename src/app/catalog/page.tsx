@@ -932,26 +932,32 @@ export default function ProductsPage() {
                 <ChevronLeft size={16} />
               </button>
               
-              {Array.from({ length: totalPages }, (_, i) => i + 1).map(page => (
-                <button 
-                  key={page}
-                  className={`${styles.pageBtn} ${currentPage === page ? styles.pageBtnActive : ''}`}
-                  onClick={() => setCurrentPage(page)}
-                >
-                  {page}
-                </button>
-              )).filter((_, i, arr) => {
-                // Show first, last, and window around current
-                if (arr.length <= 7) return true;
-                return i === 0 || i === arr.length - 1 || Math.abs(i + 1 - currentPage) <= 2;
-              }).reduce((acc: any[], page, i, arr) => {
-                // Add ellipses
-                if (i > 0 && page !== (arr[i-1] as number) + 1) {
-                  acc.push(<span key={`ellipsis-${i}`} style={{ padding: '0 0.5rem', color: '#94a3b8' }}>...</span>);
-                }
-                acc.push(page);
-                return acc;
-              }, [])}
+              {Array.from({ length: totalPages }, (_, i) => i + 1)
+                .filter((page, i, arr) => {
+                  if (arr.length <= 7) return true;
+                  return i === 0 || i === arr.length - 1 || Math.abs(page - currentPage) <= 2;
+                })
+                .reduce((acc: (number | string)[], page, i, arr) => {
+                  if (i > 0 && page !== (arr[i-1] as number) + 1) {
+                    acc.push(`ellipsis-${i}`);
+                  }
+                  acc.push(page);
+                  return acc;
+                }, [])
+                .map((item) => {
+                  if (typeof item === 'string') {
+                    return <span key={item} style={{ padding: '0 0.5rem', color: '#94a3b8' }}>...</span>;
+                  }
+                  return (
+                    <button 
+                      key={item}
+                      className={`${styles.pageBtn} ${currentPage === item ? styles.pageBtnActive : ''}`}
+                      onClick={() => setCurrentPage(item)}
+                    >
+                      {item}
+                    </button>
+                  );
+                })}
 
               <button 
                 className={`${styles.pageBtn} ${currentPage === totalPages ? styles.pageBtnDisabled : ''}`}
